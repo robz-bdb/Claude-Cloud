@@ -1,0 +1,40 @@
+name: Notion emoji tagger
+
+# Tags incomplete tasks in the TickTick-synced Notion "All Tasks" database with
+# a contextually-chosen emoji, once daily at 1 AM US Central.
+#
+# GitHub cron is UTC and has no DST support, so we trigger at both 06:00 and
+# 07:00 UTC (1 AM CDT and 1 AM CST). The script's America/Chicago guard runs the
+# real work only when the local hour is 1, so exactly one run fires per day.
+
+on:
+  schedule:
+    - cron: "0 6,7 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Log intended changes without writing to Notion"
+        type: boolean
+        default: true
+
+jobs:
+  tag-tasks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Tag tasks with emoji
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Manual runs bypass the time guard; dry-run honors the input.
+          FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: python scripts/tag_tasks_with_emoji.py
