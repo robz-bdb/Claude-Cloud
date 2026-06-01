@@ -28,8 +28,8 @@ import requests
 
 ORS_API_KEY = os.environ.get("ORS_API_KEY", "")
 # Origin defaults to the Bell County Expo Center / Cadence Bank Arena.
-ARENA_LAT = float(os.environ.get("ARENA_LAT", "31.04"))
-ARENA_LON = float(os.environ.get("ARENA_LON", "-97.49"))
+ARENA_LAT = float(os.environ.get("ARENA_LAT", "31.0305"))
+ARENA_LON = float(os.environ.get("ARENA_LON", "-97.4787"))
 # Comma-separated seconds; ascending. ORS free-tier driving-car max is 3600s.
 RANGES = os.environ.get("RANGES", "600,1200,1800,2400,3600")
 OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "docs/isochrones.geojson")
