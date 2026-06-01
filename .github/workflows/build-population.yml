@@ -1,0 +1,39 @@
+name: Build population
+
+# Recomputes docs/population.json (people within each drive-time band, per census
+# year) and commits it. Run manually from the Actions tab after setting the
+# CENSUS_API_KEY secret (Settings -> Secrets and variables -> Actions). It reads
+# the committed docs/isochrones.geojson for the band polygons, so regenerate
+# those first if the drive times changed. The committed JSON is what the Pages
+# site serves, so a push to docs/ triggers the deploy workflow.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Build population
+        env:
+          CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+        run: python scripts/build_population.py
+      - name: Commit regenerated population data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- docs/population.json; then
+            echo "No change in docs/population.json."
+          else
+            git add docs/population.json
+            git commit -m "Regenerate population from US Census"
+            git push
+          fi
