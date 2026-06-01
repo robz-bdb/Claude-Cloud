@@ -122,11 +122,27 @@ def load_bands(path: str):
 # --- Census population --------------------------------------------------------
 
 def census_get(url: str, params: dict) -> list[list]:
-    """GET a Census API endpoint, returning its 2D array (header + rows)."""
+    """GET a Census API endpoint, returning its 2D array (header + rows).
+
+    The Census API often signals problems (notably an invalid or not-yet-
+    activated key) with an HTTP 200 and a plain-text body rather than an error
+    status, so a bare resp.json() would fail opaquely. Surface the body instead.
+    """
+    safe = {k: v for k, v in params.items() if k != "key"}
     resp = requests.get(url, params=params, timeout=60)
+    body = resp.text.strip()
     if resp.status_code != 200:
-        fail(f"Census request failed ({resp.status_code}): {resp.url}\n{resp.text[:300]}")
-    return resp.json()
+        fail(f"Census request failed ({resp.status_code}) for {url} {safe}\n{body[:300]}")
+    try:
+        return resp.json()
+    except ValueError:
+        hint = ""
+        if "valid key" in body.lower() or "not valid" in body.lower():
+            hint = (
+                "\nThe CENSUS_API_KEY appears invalid or not yet activated. Check the "
+                "secret value, and click the activation link Census emailed you."
+            )
+        fail(f"Census returned non-JSON (200) for {url} {safe}\n{body[:300]}{hint}")
 
 
 def fetch_counties(year: int, dataset: str) -> list[str]:
