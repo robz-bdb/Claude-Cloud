@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Drive-time isochrone map
+
+- **Added** `scripts/build_population.py` — for each drive-time band, estimates the
+  population living inside it across real US Census years (2010 & 2020 decennial
+  100% counts; ACS 5-year for other years, e.g. 2015 & 2023). Reads the band
+  polygons from `docs/isochrones.geojson`, pulls Census block-group population and
+  TIGER cartographic boundaries for Texas, and areal-interpolates in EPSG:5070
+  (`pop = Σ BG_pop × area(BG ∩ band)/area(BG)`). Bands are nested, so each band's
+  figure is cumulative (people who can reach the arena within X minutes). Writes
+  `docs/population.json`.
+- **Added** a population summary-table panel to `docs/index.html` (bands × census
+  years + first→last growth %); it degrades gracefully when `population.json` is
+  absent.
+- **Added** the `Build population` workflow (manual; commits `population.json`,
+  which then auto-redeploys via Pages) and the build-time `geopandas`/`shapely`/
+  `pyproj` dependencies.
+
 ## [1.0.0] - 2026-06-01
 
 First tagged release. Two small, independent components live in this repo.

@@ -146,3 +146,55 @@ python -m http.server 8000 --directory docs
 | `DRY_RUN`     | no       | `false`                       | Log the summary without writing |
 
 \* Not required to *run*, but required to produce real road-network isochrones.
+
+## Population by drive-time band
+
+The map also shows **how many people live within each drive-time band**, across
+real US Census years, so you can see how the population around the arena has grown.
+
+- [`scripts/build_population.py`](scripts/build_population.py) reads the band
+  polygons from `docs/isochrones.geojson` and, for each configured census year,
+  pulls **block-group population** from the [Census API](https://api.census.gov)
+  plus the matching **TIGER cartographic boundaries** for Texas. It attributes
+  population to each band by **areal interpolation** in an equal-area projection
+  (EPSG:5070): `pop = Σ BG_pop × area(BG ∩ band) / area(BG)`. It writes
+  [`docs/population.json`](docs/population.json) (a committed, generated artifact).
+- Years map to datasets automatically: **2010** → decennial SF1, **2020** →
+  decennial DHC (both 100% counts); any other year → **ACS 5-year** estimate
+  (e.g. 2015, 2023). The data model is per-band-per-year, so adding years to
+  `YEARS` extends the table cleanly.
+- [`docs/index.html`](docs/index.html) renders a **bands × years** summary table
+  (with a first→last growth %). The bands are nested, so each figure is
+  **cumulative** — people who can reach the arena within that many minutes.
+
+> **Caveats:** ACS 5-year figures are sampled estimates (with margins of error),
+> not 100% counts like the decennial years; and areal interpolation assumes people
+> are spread evenly within each block group. Treat the numbers as solid estimates,
+> not exact head counts.
+
+### One-time setup
+
+1. **Get a free Census key** at <https://api.census.gov/data/key_signup.html> and
+   add it as the repo secret `CENSUS_API_KEY` (Settings → Secrets and variables →
+   Actions).
+2. **Generate the data:** run the **Build population** workflow (Actions → *Build
+   population* → *Run workflow*, on `main`). It computes and commits
+   `docs/population.json`, which then auto-redeploys via Pages. Or locally:
+   ```bash
+   CENSUS_API_KEY="..." python scripts/build_population.py
+   git add docs/population.json && git commit -m "Refresh population"
+   ```
+
+Until `population.json` exists, the table panel simply stays hidden — the map still
+works without it.
+
+### Configuration
+
+| Variable          | Required | Default                     | Purpose |
+|-------------------|----------|-----------------------------|---------|
+| `CENSUS_API_KEY`  | yes      | —                           | Census API key (no offline fallback) |
+| `YEARS`           | no       | `2010,2015,2020,2023`       | Comma-separated census years |
+| `ISOCHRONES_PATH` | no       | `docs/isochrones.geojson`   | Band polygons to read |
+| `OUTPUT_PATH`     | no       | `docs/population.json`       | Output file |
+| `STATE_FIPS`      | no       | `48`                        | State for block groups (`48` = Texas) |
+| `DRY_RUN`         | no       | `false`                     | Run the full pipeline but skip the write |

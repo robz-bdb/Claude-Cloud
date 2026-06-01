@@ -36,6 +36,21 @@
       background: #fff3cd; color: #856404; border: 1px solid #ffeeba;
       display: none; max-width: 360px;
     }
+    .pop-box {
+      position: absolute; top: 10px; right: 10px; z-index: 1000;
+      max-width: 360px; display: none;
+    }
+    .pop-box h2 { font-size: 14px; margin: 0 0 4px; }
+    .pop-box table { border-collapse: collapse; font-size: 12px; }
+    .pop-box th, .pop-box td { padding: 2px 6px; text-align: right; white-space: nowrap; }
+    .pop-box th { color: #444; border-bottom: 1px solid #ccc; }
+    .pop-box td.band { text-align: left; }
+    .pop-box td.grow { color: #1a7d3c; }
+    .pop-box i {
+      display: inline-block; width: 12px; height: 12px;
+      margin-right: 5px; opacity: 0.7; vertical-align: middle;
+    }
+    .pop-box .src { margin-top: 6px; font-size: 11px; color: #666; }
   </style>
 </head>
 <body>
@@ -50,6 +65,7 @@
     Regenerate <code>isochrones.geojson</code> with an ORS_API_KEY for real
     road-network drive times.
   </div>
+  <div id="pop" class="pop-box panel"></div>
 
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -128,6 +144,52 @@
         const box = document.getElementById("approx");
         box.style.display = "block";
         box.innerHTML = "Could not load isochrones.geojson: " + err.message;
+      });
+
+    // Population summary table. Optional: if population.json is absent (the
+    // build workflow hasn't run yet), the panel just stays hidden.
+    fetch("population.json")
+      .then((r) => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then((data) => {
+        const years = data.years || [];
+        const bands = (data.bands || [])
+          .slice()
+          .sort((a, b) => a.minutes - b.minutes);
+        if (!years.length || !bands.length) return;
+
+        const fmt = (n) => (n == null ? "—" : n.toLocaleString());
+        const grow = (p) => (p == null ? "—" : (p >= 0 ? "+" : "") + p + "%");
+
+        let html = "<h2>People within drive time</h2><table>";
+        html += "<tr><th></th>";
+        years.forEach((y) => (html += "<th>" + y + "</th>"));
+        html += "<th>Growth</th></tr>";
+        bands.forEach((b) => {
+          html +=
+            '<tr><td class="band"><i style="background:' +
+            b.color +
+            '"></i>' +
+            b.label +
+            "</td>";
+          years.forEach((y) => (html += "<td>" + fmt(b.population[y]) + "</td>"));
+          html += '<td class="grow">' + grow(b.growth_pct) + "</td></tr>";
+        });
+        html += "</table>";
+        html +=
+          '<div class="src">Cumulative population reachable within each drive ' +
+          "time.<br>Source: " +
+          (data.source || "US Census Bureau") +
+          "</div>";
+
+        const box = document.getElementById("pop");
+        box.innerHTML = html;
+        box.style.display = "block";
+      })
+      .catch(() => {
+        /* No population.json yet — leave the panel hidden. */
       });
   </script>
 </body>
