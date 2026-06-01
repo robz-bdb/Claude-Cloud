@@ -4,9 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A single scheduled automation: it tags incomplete Notion tasks with a
-contextually-chosen emoji once a day. There is no app server or test suite — the
-deliverable is one Python script plus the GitHub Actions workflow that runs it.
+Two small, independent components:
+
+1. **Notion emoji tagger** — a scheduled automation that tags incomplete Notion
+   tasks with a contextually-chosen emoji once a day.
+2. **Drive-time isochrone map** — a precomputed static Leaflet page (in `docs/`)
+   showing 10/20/30/40/60-minute drive-time bands around the Bell County Expo
+   Center, deployed to GitHub Pages.
+
+There is no app server or test suite. Each component is one Python script plus a
+GitHub Actions workflow.
 
 ## Commands
 
@@ -60,6 +67,33 @@ Two pieces, both intentionally small:
   exactly one effective run at 1 AM Central. Manual `workflow_dispatch` sets
   `FORCE_RUN=1` to bypass that guard. Don't "simplify" the double cron without
   also handling DST.
+
+### Drive-time isochrone map
+
+- **`scripts/build_isochrones.py`** — env-configured (no flags), mirrors the
+  tagger's style. Flow: parse ranges → resolve origin → one ORS isochrones call →
+  normalize/sort features (adding `minutes`/`label`/`color`) → write
+  `docs/isochrones.geojson`. Builds approximate concentric circles when
+  `ORS_API_KEY` is unset.
+- **`docs/index.html`** — self-contained Leaflet page (CDN), no build step.
+- **`.github/workflows/deploy-pages.yml`** — publishes `docs/`; deploy-only.
+
+Things that are easy to get wrong here:
+
+- **ORS auth uses the raw key in `Authorization`** — no `Bearer` prefix (unlike
+  the Notion script).
+- **Coordinate order differs:** ORS/GeoJSON are `[lon, lat]`; Leaflet is
+  `[lat, lon]`. Most common bug — both files call it out.
+- **Bands are nested full polygons, not rings.** The page paints them
+  minutes-descending (60 → 10) with semi-transparent fills so inner zones sit on
+  top; don't switch to difference geometry. The script writes a `color` per
+  feature so HTML and data never disagree.
+- **`docs/isochrones.geojson` is a committed generated artifact** — don't gitignore
+  it. Regenerating needs an ORS key; viewing never does.
+- **ORS free-tier driving-car max is 3600s (60 min).** The script warns past that;
+  ORS will reject larger ranges.
+- **Pages serves from the default branch**, so map changes go live after merge.
+  Keep the `paths:` filter so tagger-only pushes don't redeploy.
 
 ## Conventions
 
