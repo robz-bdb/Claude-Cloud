@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Drive Times to Bell County Expo Center</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    html, body { margin: 0; height: 100%; }
+    #map { height: 100vh; width: 100%; }
+    .panel {
+      font: 14px/1.4 system-ui, sans-serif;
+      background: rgba(255, 255, 255, 0.92);
+      padding: 10px 12px;
+      border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    }
+    .title-box {
+      position: absolute; top: 10px; left: 50px; z-index: 1000; max-width: 320px;
+    }
+    .title-box h1 { font-size: 16px; margin: 0 0 2px; }
+    .title-box p { margin: 0; color: #444; font-size: 12px; }
+    .legend i {
+      display: inline-block; width: 14px; height: 14px;
+      margin-right: 6px; opacity: 0.7; vertical-align: middle;
+    }
+    .legend .row { margin: 2px 0; }
+    .legend .src { margin-top: 6px; font-size: 11px; color: #666; }
+    .approx-banner {
+      position: absolute; bottom: 10px; left: 10px; z-index: 1000;
+      background: #fff3cd; color: #856404; border: 1px solid #ffeeba;
+      display: none; max-width: 360px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="title-box panel">
+    <h1>Drive time to the Bell County Expo Center</h1>
+    <p>Cadence Bank Arena &middot; 301 W Loop 121, Belton, TX. Bands show how far
+       you can drive in each time window.</p>
+  </div>
+  <div id="approx" class="approx-banner panel">
+    Showing <strong>approximate</strong> bands (avg 35 mph straight-line).
+    Regenerate <code>isochrones.geojson</code> with an ORS_API_KEY for real
+    road-network drive times.
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script>
+    const ARENA = [31.04, -97.49]; // Leaflet uses [lat, lon]
+    const map = L.map("map").setView(ARENA, 9);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+
+    function style(feature) {
+      return {
+        color: "#333",
+        weight: 1,
+        opacity: 0.6,
+        fillColor: feature.properties.color,
+        fillOpacity: 0.5,
+      };
+    }
+
+    fetch("isochrones.geojson")
+      .then((r) => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then((fc) => {
+        if (fc.properties && fc.properties.approximate) {
+          document.getElementById("approx").style.display = "block";
+        }
+
+        // Nested polygons: draw longest first (bottom) so shorter sit on top.
+        const feats = (fc.features || [])
+          .slice()
+          .sort((a, b) => b.properties.minutes - a.properties.minutes);
+
+        let widest = null;
+        feats.forEach((f) => {
+          const layer = L.geoJSON(f, { style }).addTo(map);
+          layer.bindPopup(f.properties.label);
+          if (!widest) widest = layer; // first = longest time = widest extent
+        });
+
+        L.marker(ARENA)
+          .addTo(map)
+          .bindPopup("<strong>Bell County Expo Center</strong><br>Cadence Bank Arena<br>301 W Loop 121, Belton, TX");
+
+        if (widest) map.fitBounds(widest.getBounds(), { padding: [20, 20] });
+
+        // Legend, ordered shortest -> longest.
+        const legend = L.control({ position: "bottomright" });
+        legend.onAdd = function () {
+          const div = L.DomUtil.create("div", "legend panel");
+          let html = "<strong>Drive time</strong>";
+          feats
+            .slice()
+            .sort((a, b) => a.properties.minutes - b.properties.minutes)
+            .forEach((f) => {
+              html +=
+                '<div class="row"><i style="background:' +
+                f.properties.color +
+                '"></i>' +
+                f.properties.label +
+                "</div>";
+            });
+          html += '<div class="src">Isochrones: openrouteservice.org<br>Map: Leaflet / OpenStreetMap</div>';
+          div.innerHTML = html;
+          return div;
+        };
+        legend.addTo(map);
+      })
+      .catch((err) => {
+        const box = document.getElementById("approx");
+        box.style.display = "block";
+        box.innerHTML = "Could not load isochrones.geojson: " + err.message;
+      });
+  </script>
+</body>
+</html>
