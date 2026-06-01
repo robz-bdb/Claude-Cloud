@@ -86,6 +86,8 @@ Center / Cadence Bank Arena** (301 W Loop 121, Belton, TX) in 10 / 20 / 30 / 40 
 60-minute bands. It's a precomputed [Leaflet](https://leafletjs.com) page served
 from [`docs/`](docs/) via GitHub Pages — no API key is needed to view it.
 
+**▶ Live map: <https://robz-bdb.github.io/Claude-Cloud/>**
+
 ## How it works
 
 - [`scripts/build_isochrones.py`](scripts/build_isochrones.py) calls the
@@ -119,6 +121,11 @@ from [`docs/`](docs/) via GitHub Pages — no API key is needed to view it.
    serves from the **default branch (`main`)**, so the site goes live after this
    work is merged.
 
+> Already set up for this repo: Pages is enabled, `main` is the default branch,
+> and the live map above auto-republishes on every push to `main` that touches
+> `docs/`. To refresh drive times, run the **Build isochrones** workflow (Actions
+> → *Build isochrones* → *Run workflow*); it regenerates and commits the GeoJSON.
+
 ## Local preview
 
 ```bash
@@ -131,8 +138,8 @@ python -m http.server 8000 --directory docs
 | Variable      | Required | Default                       | Purpose |
 |---------------|----------|-------------------------------|---------|
 | `ORS_API_KEY` | no\*     | —                             | ORS key; if unset, builds approximate circles |
-| `ARENA_LAT`   | no       | `31.04`                       | Origin latitude |
-| `ARENA_LON`   | no       | `-97.49`                      | Origin longitude |
+| `ARENA_LAT`   | no       | `31.0305`                     | Origin latitude |
+| `ARENA_LON`   | no       | `-97.4787`                    | Origin longitude |
 | `RANGES`      | no       | `600,1200,1800,2400,3600`     | Comma-separated seconds (ORS max 3600) |
 | `OUTPUT_PATH` | no       | `docs/isochrones.geojson`     | Output file |
 | `GEOCODE`     | no       | `false`                       | Resolve origin by geocoding the address |
