@@ -1,0 +1,75 @@
+{
+ "name": "Bell County Expo Center / Cadence Bank Arena",
+ "address": "301 W Loop 121, Belton, TX 76513",
+ "source": "US Census Bureau (2010:dec/sf1, 2015:acs/acs5, 2020:dec/dhc, 2023:acs/acs5) + TIGER cartographic boundaries",
+ "method": "Areal interpolation of block-group population into nested drive-time bands (EPSG:5070, area-weighted); cumulative within each band.",
+ "years": [
+  2010,
+  2015,
+  2020,
+  2023
+ ],
+ "generated": "2026-06-02T00:32:08+00:00",
+ "bands": [
+  {
+   "minutes": 10,
+   "color": "#2c7bb6",
+   "label": "10 min",
+   "population": {
+    "2010": 36182,
+    "2015": 37853,
+    "2020": 44100,
+    "2023": 46158
+   },
+   "growth_pct": 27.6
+  },
+  {
+   "minutes": 20,
+   "color": "#abd9e9",
+   "label": "20 min",
+   "population": {
+    "2010": 193082,
+    "2015": 203745,
+    "2020": 240347,
+    "2023": 250269
+   },
+   "growth_pct": 29.6
+  },
+  {
+   "minutes": 30,
+   "color": "#ffffbf",
+   "label": "30 min",
+   "population": {
+    "2010": 375695,
+    "2015": 394984,
+    "2020": 454254,
+    "2023": 469373
+   },
+   "growth_pct": 24.9
+  },
+  {
+   "minutes": 40,
+   "color": "#fdae61",
+   "label": "40 min",
+   "population": {
+    "2010": 634507,
+    "2015": 680212,
+    "2020": 812711,
+    "2023": 845542
+   },
+   "growth_pct": 33.3
+  },
+  {
+   "minutes": 60,
+   "color": "#d7191c",
+   "label": "60 min",
+   "population": {
+    "2010": 1766176,
+    "2015": 1904745,
+    "2020": 2221464,
+    "2023": 2291371
+   },
+   "growth_pct": 29.7
+  }
+ ]
+}
