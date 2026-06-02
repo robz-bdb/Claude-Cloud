@@ -197,4 +197,5 @@ works without it.
 | `ISOCHRONES_PATH` | no       | `docs/isochrones.geojson`   | Band polygons to read |
 | `OUTPUT_PATH`     | no       | `docs/population.json`       | Output file |
 | `STATE_FIPS`      | no       | `48`                        | State for block groups (`48` = Texas) |
+| `CENSUS_WORKERS`  | no       | `16`                        | Parallel workers for the per-county Census fetch |
 | `DRY_RUN`         | no       | `false`                     | Run the full pipeline but skip the write |

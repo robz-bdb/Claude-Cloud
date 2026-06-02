@@ -26,6 +26,7 @@ import json
 import os
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
@@ -41,6 +42,9 @@ ISOCHRONES_PATH = os.environ.get("ISOCHRONES_PATH", "docs/isochrones.geojson")
 OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "docs/population.json")
 # Texas; the 60-min reach around Belton stays within the state.
 STATE_FIPS = os.environ.get("STATE_FIPS", "48")
+# Block-group population is fetched one county at a time (~254 in TX); fetch them
+# concurrently to keep the build to a couple of minutes.
+CENSUS_WORKERS = int(os.environ.get("CENSUS_WORKERS", "16"))
 DRY_RUN = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
 
 CENSUS_BASE = "https://api.census.gov/data"
@@ -156,39 +160,49 @@ def fetch_counties(year: int, dataset: str) -> list[str]:
     return sorted({r[ci] for r in rows[1:]})
 
 
+def _fetch_county_bg(year: int, dataset: str, var: str, county: str) -> dict:
+    """Return {GEOID(12): population} for one county's block groups."""
+    rows = census_get(
+        f"{CENSUS_BASE}/{year}/{dataset}",
+        {
+            "get": var,
+            "for": "block group:*",
+            "in": f"state:{STATE_FIPS} county:{county}",
+            "key": CENSUS_API_KEY,
+        },
+    )
+    header = rows[0]
+    vi = header.index(var)
+    # Keep FIPS columns as strings; int() would strip leading zeros.
+    idx = {k: header.index(k) for k in ("state", "county", "tract", "block group")}
+    out: dict[str, int] = {}
+    for r in rows[1:]:
+        geoid = r[idx["state"]] + r[idx["county"]] + r[idx["tract"]] + r[idx["block group"]]
+        try:
+            val = int(r[vi])
+        except (TypeError, ValueError):
+            val = 0
+        # ACS uses large negative sentinels for suppressed estimates.
+        out[geoid] = max(val, 0)
+    return out
+
+
 def fetch_block_group_pop(year: int, cfg: dict) -> dict:
     """Return {GEOID(12): population} for every block group in the state.
 
     Block-group queries must be scoped to one state, and the county wildcard is
-    not reliably supported across all vintages, so iterate counties explicitly.
+    not reliably supported across all vintages, so iterate counties explicitly,
+    fetching them concurrently.
     """
     dataset, var = cfg["dataset"], cfg["var"]
-    pops: dict[str, int] = {}
     counties = fetch_counties(year, dataset)
     log(f"  {year}: {dataset} {var} over {len(counties)} counties in state {STATE_FIPS}")
-    for county in counties:
-        rows = census_get(
-            f"{CENSUS_BASE}/{year}/{dataset}",
-            {
-                "get": var,
-                "for": "block group:*",
-                "in": f"state:{STATE_FIPS} county:{county}",
-                "key": CENSUS_API_KEY,
-            },
-        )
-        header = rows[0]
-        vi = header.index(var)
-        # Keep FIPS columns as strings; int() would strip leading zeros.
-        idx = {k: header.index(k) for k in ("state", "county", "tract", "block group")}
-        for r in rows[1:]:
-            geoid = r[idx["state"]] + r[idx["county"]] + r[idx["tract"]] + r[idx["block group"]]
-            raw = r[vi]
-            try:
-                val = int(raw)
-            except (TypeError, ValueError):
-                val = 0
-            # ACS uses large negative sentinels for suppressed estimates.
-            pops[geoid] = max(val, 0)
+    pops: dict[str, int] = {}
+    with ThreadPoolExecutor(max_workers=CENSUS_WORKERS) as pool:
+        for county_pops in pool.map(
+            lambda c: _fetch_county_bg(year, dataset, var, c), counties
+        ):
+            pops.update(county_pops)
     log(f"  {year}: {len(pops)} block groups, total state pop {sum(pops.values()):,}")
     return pops
 
@@ -264,35 +278,26 @@ def population_in_bands(bands, bgs_with_pop) -> dict:
     computed in an equal-area CRS. Bands are nested, so intersecting each band
     independently yields cumulative population directly.
     """
-    import geopandas as gpd
+    bands = bands.to_crs(EQUAL_AREA_CRS).copy()
+    bands["geometry"] = bands.geometry.buffer(0)  # repair self-intersecting polygons
+    widest = bands.loc[bands["minutes"].idxmax(), "geometry"]
 
-    bands = bands.to_crs(EQUAL_AREA_CRS)
+    # Bounding-box prefilter (via spatial index) then a precise intersects, so we
+    # only repair and intersect the BGs that can reach the widest band.
     bgs = bgs_with_pop.to_crs(EQUAL_AREA_CRS)
-    # Repair self-intersecting CB / ORS polygons before overlay.
-    bands = bands.copy()
-    bands["geometry"] = bands.geometry.buffer(0)
-    bgs = bgs.copy()
+    hits = bgs.sindex.query(widest, predicate="intersects")
+    bgs = bgs.iloc[hits].copy()
     bgs["geometry"] = bgs.geometry.buffer(0)
+    bgs = bgs[bgs.intersects(widest)]
     bgs["bg_area"] = bgs.geometry.area
 
-    # Prefilter to BGs touching the widest (max-minutes) band.
-    widest = bands.loc[bands["minutes"].idxmax(), "geometry"]
-    bgs = bgs[bgs.intersects(widest)]
-
+    # Bands are nested, so a vectorized intersection against each band gives
+    # cumulative population directly (people reachable within X minutes).
     result: dict[int, int] = {}
     for _, band in bands.iterrows():
-        one = gpd.GeoDataFrame(geometry=[band.geometry], crs=bands.crs)
-        inter = gpd.overlay(
-            bgs[["GEOID", "pop", "bg_area", "geometry"]],
-            one,
-            how="intersection",
-            keep_geom_type=True,
-        )
-        if inter.empty:
-            result[int(band["minutes"])] = 0
-            continue
-        frac = (inter.geometry.area / inter["bg_area"]).clip(0, 1)
-        result[int(band["minutes"])] = int(round((inter["pop"] * frac).sum()))
+        inter_area = bgs.geometry.intersection(band.geometry).area
+        frac = (inter_area / bgs["bg_area"]).clip(0, 1)
+        result[int(band["minutes"])] = int(round((bgs["pop"] * frac).sum()))
     return result
 
 

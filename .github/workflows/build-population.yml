@@ -30,10 +30,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- docs/population.json; then
+          git add docs/population.json
+          # Check the staged index so a brand-new (untracked) file is detected too.
+          if git diff --cached --quiet -- docs/population.json; then
             echo "No change in docs/population.json."
           else
-            git add docs/population.json
             git commit -m "Regenerate population from US Census"
             git push
           fi
