@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** the `Build population` workflow (manual; commits `population.json`,
   which then auto-redeploys via Pages) and the build-time `geopandas`/`shapely`/
   `pyproj` dependencies.
+- **Changed** the population build to fetch counties concurrently
+  (`CENSUS_WORKERS`) and attribute population with a vectorized intersection
+  instead of a per-band overlay, cutting the build from ~15-20 min to a couple of
+  minutes.
+- **Fixed** the `Build population` commit step so a brand-new (untracked)
+  `population.json` is actually committed (`git add` then check `--cached`).
 
 ## [1.0.0] - 2026-06-01
 
