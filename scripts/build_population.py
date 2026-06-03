@@ -38,6 +38,12 @@ CENSUS_API_KEY = os.environ.get("CENSUS_API_KEY", "")
 # others are ACS 5-year estimates (e.g. 2015, 2023). Data model is per-year so
 # more years extend cleanly.
 YEARS = os.environ.get("YEARS", "2010,2015,2020,2023")
+# A current-year estimate that real census products lag: each base-year (2020)
+# block group is scaled by its county's base->current Census PEP growth factor,
+# then interpolated like any other year. Set CURRENT_YEAR="" to disable.
+CURRENT_YEAR = os.environ.get("CURRENT_YEAR", "2024")
+CURRENT_BASE_YEAR = int(os.environ.get("CURRENT_BASE_YEAR", "2020"))
+PEP_VINTAGE = os.environ.get("PEP_VINTAGE", "2024")
 ISOCHRONES_PATH = os.environ.get("ISOCHRONES_PATH", "docs/isochrones.geojson")
 OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "docs/population.json")
 # Texas; the 60-min reach around Belton stays within the state.
@@ -207,6 +213,50 @@ def fetch_block_group_pop(year: int, cfg: dict) -> dict:
     return pops
 
 
+# --- Population Estimates Program (current-year growth) -----------------------
+
+def fetch_pep_factors(base_year: int, current_year: int, vintage: str) -> dict:
+    """Return {county FIPS(3): base->current growth factor} from Census PEP.
+
+    The decennial/ACS products lag the present; PEP publishes point-in-time
+    July-1 county estimates each year. We use the per-county base->current ratio
+    to age the base-year block groups forward (uniform growth within a county).
+
+    The Census *API* does not expose recent PEP vintages, but the county totals
+    are published as a flat CSV on the FTP server (same host as the TIGER
+    geometry), so we read that. Override with PEP_CSV_URL if the path changes.
+    """
+    import csv
+    import io
+
+    url = os.environ.get("PEP_CSV_URL") or (
+        f"https://www2.census.gov/programs-surveys/popest/datasets/"
+        f"{base_year}-{vintage}/counties/totals/co-est{vintage}-alldata.csv"
+    )
+    log(f"  PEP totals CSV: {url}")
+    resp = requests.get(url, timeout=120)
+    if resp.status_code != 200:
+        fail(f"PEP CSV download failed ({resp.status_code}): {url}")
+    reader = csv.DictReader(io.StringIO(resp.content.decode("latin-1")))
+    bcol, ccol = f"POPESTIMATE{base_year}", f"POPESTIMATE{current_year}"
+    if reader.fieldnames is None or bcol not in reader.fieldnames or ccol not in reader.fieldnames:
+        fail(f"PEP CSV missing {bcol}/{ccol}; columns: {reader.fieldnames}")
+    factors: dict[str, float] = {}
+    for row in reader:
+        if row.get("STATE") != STATE_FIPS or row.get("SUMLEV") != "050":
+            continue  # county rows in the target state only
+        try:
+            base, cur = float(row[bcol]), float(row[ccol])
+        except (TypeError, ValueError):
+            continue
+        if base > 0 and row.get("COUNTY"):
+            factors[row["COUNTY"]] = cur / base
+    if not factors:
+        fail(f"PEP CSV had no usable county rows for state {STATE_FIPS}: {url}")
+    log(f"  PEP v{vintage}: {len(factors)} county factors, base {base_year} -> {current_year}")
+    return factors
+
+
 # --- Block-group geometry -----------------------------------------------------
 
 def bg_shapefile_url(geo_year: int) -> str:
@@ -303,37 +353,69 @@ def population_in_bands(bands, bgs_with_pop) -> dict:
 
 # --- Output -------------------------------------------------------------------
 
-def growth_pct(pops: dict, years: list[int]):
-    first, last = pops.get(str(years[0])), pops.get(str(years[-1]))
+def growth_pct(pops: dict, order: list[int]):
+    first, last = pops.get(str(order[0])), pops.get(str(order[-1]))
     if not first:  # missing or zero -> undefined growth
         return None
     return round((last - first) / first * 100, 1)
 
 
-def build_output(meta: list[dict], pops_by_year: dict, years: list[int]) -> dict:
-    datasets = ", ".join(f"{y}:{year_config(y)['dataset']}" for y in years)
+def column_label(year: int, current_year: int | None) -> str:
+    """Human-honest column header. ACS 5-year estimates are a rolling average
+    (~midpoint), not a point-in-time year, and the PEP-scaled column is flagged
+    as a current-year estimate so neither is misread as a clean census count."""
+    if current_year is not None and year == current_year:
+        return f"{year} (current)"
+    if year_config(year)["dataset"] == "acs/acs5":
+        return f"{year - 4}–{str(year)[-2:]} ACS (~{year - 2})"
+    return str(year)  # decennial 100% count
+
+
+def build_output(
+    meta: list[dict], pops_by_year: dict, census_years: list[int],
+    current_year: int | None, pep_vintage: str,
+) -> dict:
+    order = sorted(pops_by_year)  # census years plus the current-year column
+    has_current = current_year is not None and current_year in pops_by_year
+    columns = [{"key": str(y), "label": column_label(y, current_year)} for y in order]
+
     bands = []
     for m in meta:
         minutes = m["minutes"]
-        population = {str(y): pops_by_year[y][minutes] for y in years}
+        population = {str(y): pops_by_year[y][minutes] for y in order}
         bands.append(
             {
                 "minutes": minutes,
                 "color": m["color"],
                 "label": m["label"],
                 "population": population,
-                "growth_pct": growth_pct(population, years),
+                "growth_pct": growth_pct(population, order),
             }
         )
+
+    datasets = ", ".join(f"{y}:{year_config(y)['dataset']}" for y in census_years)
+    source = f"US Census Bureau ({datasets})"
+    method = (
+        "Areal interpolation of block-group population into nested drive-time "
+        "bands (EPSG:5070, area-weighted); cumulative within each band."
+    )
+    if has_current:
+        source += f" + PEP Vintage {pep_vintage} (county-scaled current year)"
+        method += (
+            f" The {current_year} (current) column ages each {CURRENT_BASE_YEAR} block "
+            f"group by its county's {CURRENT_BASE_YEAR}–{current_year} Census PEP "
+            "growth factor (uniform within county), since decennial/ACS products lag "
+            "the present."
+        )
+    source += " + TIGER cartographic boundaries"
+
     return {
         "name": ARENA_NAME,
         "address": ARENA_ADDRESS,
-        "source": f"US Census Bureau ({datasets}) + TIGER cartographic boundaries",
-        "method": (
-            "Areal interpolation of block-group population into nested drive-time "
-            "bands (EPSG:5070, area-weighted); cumulative within each band."
-        ),
-        "years": years,
+        "source": source,
+        "method": method,
+        "years": order,
+        "columns": columns,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "bands": bands,
     }
@@ -358,8 +440,11 @@ def main() -> None:
     bands, meta = load_bands(ISOCHRONES_PATH)
     log(f"Bands (min): {[m['minutes'] for m in meta]}; years: {years}")
 
+    current_year = int(CURRENT_YEAR) if CURRENT_YEAR.strip() else None
+
     geo_cache: dict[int, object] = {}
     pops_by_year: dict[int, dict] = {}
+    base_bgs = None  # block groups (with pop) for the current-year scaling base
     for year in years:
         cfg = year_config(year)
         log(f"Year {year}:")
@@ -371,9 +456,27 @@ def main() -> None:
         bgs["pop"] = bgs["GEOID"].map(pop_by_geoid).fillna(0).astype(int)
         band_pops = population_in_bands(bands, bgs)
         pops_by_year[year] = band_pops
+        if year == CURRENT_BASE_YEAR:
+            base_bgs = bgs
         log(f"  {year} per-band cumulative: " + ", ".join(f"{k}min={v:,}" for k, v in sorted(band_pops.items())))
 
-    out = build_output(meta, pops_by_year, years)
+    # Current-year column: age the base-year block groups by per-county PEP growth.
+    if current_year is not None:
+        if base_bgs is None:
+            fail(f"CURRENT_YEAR={current_year} needs base year {CURRENT_BASE_YEAR} in YEARS={years}.")
+        log(f"Current year {current_year} (PEP v{PEP_VINTAGE}, scaled from {CURRENT_BASE_YEAR}):")
+        factors = fetch_pep_factors(CURRENT_BASE_YEAR, current_year, PEP_VINTAGE)
+        for fips, nm in (("027", "Bell"), ("491", "Williamson"), ("453", "Travis"), ("309", "McLennan")):
+            if fips in factors:
+                log(f"    {nm} county 2020->{current_year} factor: {factors[fips]:.3f}")
+        scaled = base_bgs.copy()
+        county_factor = scaled["GEOID"].str[2:5].map(factors).fillna(1.0)
+        scaled["pop"] = (scaled["pop"] * county_factor).round().astype(int)
+        band_pops = population_in_bands(bands, scaled)
+        pops_by_year[current_year] = band_pops
+        log(f"  {current_year} per-band cumulative: " + ", ".join(f"{k}min={v:,}" for k, v in sorted(band_pops.items())))
+
+    out = build_output(meta, pops_by_year, years, current_year, PEP_VINTAGE)
     summary = f"years={years} bands={len(out['bands'])}"
     if DRY_RUN:
         log(f"[dry-run] would write {OUTPUT_PATH}: {summary}")

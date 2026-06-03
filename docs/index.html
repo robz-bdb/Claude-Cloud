@@ -154,18 +154,22 @@
         return r.json();
       })
       .then((data) => {
-        const years = data.years || [];
+        // Prefer labelled columns (honest ACS / current-year headers); fall back
+        // to bare years for older population.json files.
+        const cols = (data.columns && data.columns.length)
+          ? data.columns
+          : (data.years || []).map((y) => ({ key: String(y), label: String(y) }));
         const bands = (data.bands || [])
           .slice()
           .sort((a, b) => a.minutes - b.minutes);
-        if (!years.length || !bands.length) return;
+        if (!cols.length || !bands.length) return;
 
         const fmt = (n) => (n == null ? "—" : n.toLocaleString());
         const grow = (p) => (p == null ? "—" : (p >= 0 ? "+" : "") + p + "%");
 
         let html = "<h2>People within drive time</h2><table>";
         html += "<tr><th></th>";
-        years.forEach((y) => (html += "<th>" + y + "</th>"));
+        cols.forEach((c) => (html += "<th>" + c.label + "</th>"));
         html += "<th>Growth</th></tr>";
         bands.forEach((b) => {
           html +=
@@ -174,7 +178,7 @@
             '"></i>' +
             b.label +
             "</td>";
-          years.forEach((y) => (html += "<td>" + fmt(b.population[y]) + "</td>"));
+          cols.forEach((c) => (html += "<td>" + fmt(b.population[c.key]) + "</td>"));
           html += '<td class="grow">' + grow(b.growth_pct) + "</td></tr>";
         });
         html += "</table>";

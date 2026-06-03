@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Drive-time isochrone map
 
+- **Added** a `2024 (current)` population column: each 2020 block group is aged by
+  its county's 2020→2024 Census **PEP** (Population Estimates Program) growth
+  factor, then areal-interpolated like any other year — giving a current estimate
+  that the decennial/ACS products lag (the fast-growing Williamson County corridor
+  was being understated). Configurable via `CURRENT_YEAR`/`PEP_VINTAGE`.
+- **Changed** the population table to use honest column labels — ACS 5-year columns
+  now read e.g. `2019–23 ACS (~2021)` (a rolling average, not a point-in-time year)
+  and the current column reads `2024 (current)`. `population.json` now carries a
+  `columns` array and `docs/index.html` renders those labels.
 - **Added** `scripts/build_population.py` — for each drive-time band, estimates the
   population living inside it across real US Census years (2010 & 2020 decennial
   100% counts; ACS 5-year for other years, e.g. 2015 & 2023). Reads the band
