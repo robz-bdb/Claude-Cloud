@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Drive-time isochrone map
 
 - **Added** a **Growth** tab to the map — small-multiple census-tract heat maps (one
-  per year: 2015, 2020, 2024) shading each tract by its % population growth since
+  per available year) shading each of ~540 tracts by its % population growth since
   2010, so you can see *where* the area grew (the Williamson County / I-35 corridor
-  stands out). New committed artifact `docs/growth_tracts.geojson`; the tab hides
-  itself when that file is absent.
+  stands out). New committed artifact `docs/growth_tracts.geojson` (~0.9 MB); the tab
+  hides itself when that file is absent.
 - **Added** to `scripts/build_population.py` a fixed-tract growth pipeline:
   `load_tracts` plus a generic `interpolate_into` helper areal-interpolate every
   year's block groups (including the PEP-scaled current year) into a single 2020
