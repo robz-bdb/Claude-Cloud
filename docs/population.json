@@ -1,15 +1,38 @@
 {
  "name": "Bell County Expo Center / Cadence Bank Arena",
  "address": "301 W Loop 121, Belton, TX 76513",
- "source": "US Census Bureau (2010:dec/sf1, 2015:acs/acs5, 2020:dec/dhc, 2023:acs/acs5) + TIGER cartographic boundaries",
- "method": "Areal interpolation of block-group population into nested drive-time bands (EPSG:5070, area-weighted); cumulative within each band.",
+ "source": "US Census Bureau (2010:dec/sf1, 2015:acs/acs5, 2020:dec/dhc, 2023:acs/acs5) + PEP Vintage 2024 (county-scaled current year) + TIGER cartographic boundaries",
+ "method": "Areal interpolation of block-group population into nested drive-time bands (EPSG:5070, area-weighted); cumulative within each band. The 2024 (current) column ages each 2020 block group by its county's 2020–2024 Census PEP growth factor (uniform within county), since decennial/ACS products lag the present.",
  "years": [
   2010,
   2015,
   2020,
-  2023
+  2023,
+  2024
  ],
- "generated": "2026-06-02T00:32:08+00:00",
+ "columns": [
+  {
+   "key": "2010",
+   "label": "2010"
+  },
+  {
+   "key": "2015",
+   "label": "2011–15 ACS (~2013)"
+  },
+  {
+   "key": "2020",
+   "label": "2020"
+  },
+  {
+   "key": "2023",
+   "label": "2019–23 ACS (~2021)"
+  },
+  {
+   "key": "2024",
+   "label": "2024 (current)"
+  }
+ ],
+ "generated": "2026-06-03T22:54:47+00:00",
  "bands": [
   {
    "minutes": 10,
@@ -19,9 +42,10 @@
     "2010": 36182,
     "2015": 37853,
     "2020": 44100,
-    "2023": 46158
+    "2023": 46158,
+    "2024": 47318
    },
-   "growth_pct": 27.6
+   "growth_pct": 30.8
   },
   {
    "minutes": 20,
@@ -31,9 +55,10 @@
     "2010": 193082,
     "2015": 203745,
     "2020": 240347,
-    "2023": 250269
+    "2023": 250269,
+    "2024": 258879
    },
-   "growth_pct": 29.6
+   "growth_pct": 34.1
   },
   {
    "minutes": 30,
@@ -43,9 +68,10 @@
     "2010": 375695,
     "2015": 394984,
     "2020": 454254,
-    "2023": 469373
+    "2023": 469373,
+    "2024": 493925
    },
-   "growth_pct": 24.9
+   "growth_pct": 31.5
   },
   {
    "minutes": 40,
@@ -55,9 +81,10 @@
     "2010": 634507,
     "2015": 680212,
     "2020": 812711,
-    "2023": 845542
+    "2023": 845542,
+    "2024": 902349
    },
-   "growth_pct": 33.3
+   "growth_pct": 42.2
   },
   {
    "minutes": 60,
@@ -67,9 +94,10 @@
     "2010": 1766176,
     "2015": 1904745,
     "2020": 2221464,
-    "2023": 2291371
+    "2023": 2291371,
+    "2024": 2419310
    },
-   "growth_pct": 29.7
+   "growth_pct": 37.0
   }
  ]
 }
