@@ -46,6 +46,14 @@ CURRENT_BASE_YEAR = int(os.environ.get("CURRENT_BASE_YEAR", "2020"))
 PEP_VINTAGE = os.environ.get("PEP_VINTAGE", "2024")
 ISOCHRONES_PATH = os.environ.get("ISOCHRONES_PATH", "docs/isochrones.geojson")
 OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "docs/population.json")
+# Per-tract growth heat-map artifact (the "Growth" tab). Each year's block groups
+# are interpolated into a single fixed tract geography so the years are comparable
+# even though tract boundaries change between censuses.
+EMIT_TRACTS = os.environ.get("EMIT_TRACTS", "1").lower() in ("1", "true", "yes")
+TRACTS_OUTPUT_PATH = os.environ.get("TRACTS_OUTPUT_PATH", "docs/growth_tracts.geojson")
+GROWTH_BASE_YEAR = int(os.environ.get("GROWTH_BASE_YEAR", "2010"))
+TRACT_GEO_YEAR = int(os.environ.get("TRACT_GEO_YEAR", "2020"))
+TRACT_SIMPLIFY = float(os.environ.get("TRACT_SIMPLIFY", "0.0006"))  # ~60 m, to trim file size
 # Texas; the 60-min reach around Belton stays within the state.
 STATE_FIPS = os.environ.get("STATE_FIPS", "48")
 # Block-group population is fetched one county at a time (~254 in TX); fetch them
@@ -319,6 +327,36 @@ def load_block_groups(geo_year: int):
     return gdf[["GEOID", "geometry"]]
 
 
+def load_tracts(geo_year: int):
+    """Download + read the state's census-tract cartographic boundaries (EPSG:4326).
+
+    Tracts are the fixed display geography for the growth heat map; one vintage is
+    used for every year so the small-multiple panels are directly comparable.
+    """
+    import geopandas as gpd
+
+    url = f"{TIGER_BASE}/GENZ{geo_year}/shp/cb_{geo_year}_{STATE_FIPS}_tract_500k.zip"
+    log(f"  tract geometry: {url}")
+    resp = requests.get(url, timeout=180)
+    if resp.status_code != 200:
+        fail(f"TIGER tract download failed ({resp.status_code}): {url}")
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        tmp.write(resp.content)
+        zip_path = tmp.name
+    try:
+        gdf = gpd.read_file(f"zip://{zip_path}")
+    finally:
+        os.unlink(zip_path)
+    if "GEOID" in gdf.columns:
+        gdf["GEOID"] = gdf["GEOID"].astype(str)
+    elif "GEO_ID" in gdf.columns:
+        gdf["GEOID"] = gdf["GEO_ID"].astype(str).str.split("US").str[-1]
+    else:
+        fail(f"Cannot derive tract GEOID from columns: {sorted(gdf.columns)}")
+    gdf = gdf.set_crs("EPSG:4326") if gdf.crs is None else gdf.to_crs("EPSG:4326")
+    return gdf[["GEOID", "geometry"]]
+
+
 # --- Areal interpolation ------------------------------------------------------
 
 def population_in_bands(bands, bgs_with_pop) -> dict:
@@ -349,6 +387,38 @@ def population_in_bands(bands, bgs_with_pop) -> dict:
         frac = (inter_area / bgs["bg_area"]).clip(0, 1)
         result[int(band["minutes"])] = int(round((bgs["pop"] * frac).sum()))
     return result
+
+
+def interpolate_into(targets, bgs_with_pop, clip_geom) -> dict:
+    """Area-weighted population from block groups into arbitrary target polygons.
+
+    Returns {target GEOID: population}. Unlike `population_in_bands` (nested,
+    cumulative) the targets here are disjoint tracts, so a single vectorized
+    overlay is the efficient approach. `clip_geom` (EPSG:4326, the widest band)
+    prefilters the block groups to the reachable region.
+    """
+    import geopandas as gpd
+
+    tg = targets.to_crs(EQUAL_AREA_CRS).copy()
+    tg["geometry"] = tg.geometry.buffer(0)
+    clip = gpd.GeoSeries([clip_geom], crs="EPSG:4326").to_crs(EQUAL_AREA_CRS).iloc[0]
+
+    bgs = bgs_with_pop.to_crs(EQUAL_AREA_CRS)
+    hits = bgs.sindex.query(clip, predicate="intersects")
+    bgs = bgs.iloc[hits].copy()
+    bgs["geometry"] = bgs.geometry.buffer(0)
+    bgs["bg_area"] = bgs.geometry.area
+    bgs = bgs[bgs["bg_area"] > 0]
+
+    inter = gpd.overlay(
+        bgs[["geometry", "pop", "bg_area"]],
+        tg[["geometry", "GEOID"]],
+        how="intersection",
+        keep_geom_type=True,
+    )
+    frac = (inter.geometry.area / inter["bg_area"]).clip(0, 1)
+    inter["alloc"] = inter["pop"] * frac
+    return {g: int(round(v)) for g, v in inter.groupby("GEOID")["alloc"].sum().items()}
 
 
 # --- Output -------------------------------------------------------------------
@@ -421,6 +491,66 @@ def build_output(
     }
 
 
+def _round_coords(obj, nd=5):
+    if isinstance(obj, (list, tuple)):
+        if obj and isinstance(obj[0], (int, float)):
+            return [round(obj[0], nd), round(obj[1], nd)]
+        return [_round_coords(o, nd) for o in obj]
+    return obj
+
+
+def build_tracts(tracts_gdf, tract_pops_by_year: dict, base_year: int) -> dict:
+    """FeatureCollection of fixed tracts with per-year % growth vs the base year.
+
+    Geometry is simplified + coordinate-rounded to keep the static artifact lean.
+    pop_base is included so the page can flag brand-new tracts (base population 0).
+    """
+    from shapely.geometry import mapping
+
+    years = sorted(tract_pops_by_year)
+    growth_years = [y for y in years if y != base_year]
+    gdf = tracts_gdf.copy()
+    if TRACT_SIMPLIFY > 0:
+        gdf["geometry"] = gdf.geometry.simplify(TRACT_SIMPLIFY, preserve_topology=True)
+
+    base = tract_pops_by_year.get(base_year, {})
+    feats = []
+    for _, row in gdf.iterrows():
+        g = row["GEOID"]
+        b = int(base.get(g, 0))
+        growth = {}
+        for y in growth_years:
+            py = tract_pops_by_year.get(y, {}).get(g, 0)
+            growth[str(y)] = round((py / b - 1) * 100, 1) if b > 0 else None
+        if row.geometry is None or row.geometry.is_empty:
+            continue
+        feats.append(
+            {
+                "type": "Feature",
+                "properties": {"GEOID": g, "pop_base": b, "growth": growth},
+                "geometry": {
+                    "type": row.geometry.geom_type,
+                    "coordinates": _round_coords(mapping(row.geometry)["coordinates"]),
+                },
+            }
+        )
+    return {
+        "type": "FeatureCollection",
+        "properties": {
+            "name": ARENA_NAME,
+            "base_year": base_year,
+            "years": growth_years,
+            "metric": f"percent population growth since {base_year}",
+            "method": (
+                f"Each year's block-group population areal-interpolated into fixed "
+                f"{TRACT_GEO_YEAR} census tracts (EPSG:5070); growth = year/{base_year} - 1."
+            ),
+            "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        },
+        "features": feats,
+    }
+
+
 def write_json(path: str, obj: dict) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -442,6 +572,22 @@ def main() -> None:
 
     current_year = int(CURRENT_YEAR) if CURRENT_YEAR.strip() else None
 
+    # Fixed tract geography for the growth heat map, clipped to the widest band so
+    # every year is interpolated into the same comparable set of tracts.
+    widest_geom = bands.loc[bands["minutes"].idxmax(), "geometry"]
+    tracts = None
+    tract_pops_by_year: dict[int, dict] = {}
+    if EMIT_TRACTS:
+        import geopandas as gpd
+
+        tracts = load_tracts(TRACT_GEO_YEAR)
+        w5 = gpd.GeoSeries([widest_geom], crs="EPSG:4326").to_crs(EQUAL_AREA_CRS).iloc[0]
+        hits = tracts.to_crs(EQUAL_AREA_CRS).sindex.query(w5, predicate="intersects")
+        tracts = tracts.iloc[hits].copy()
+        keep = tracts.to_crs(EQUAL_AREA_CRS).buffer(0).intersects(w5)
+        tracts = tracts[keep.values].reset_index(drop=True)
+        log(f"Growth tracts ({TRACT_GEO_YEAR}) within widest band: {len(tracts)}")
+
     geo_cache: dict[int, object] = {}
     pops_by_year: dict[int, dict] = {}
     base_bgs = None  # block groups (with pop) for the current-year scaling base
@@ -456,6 +602,8 @@ def main() -> None:
         bgs["pop"] = bgs["GEOID"].map(pop_by_geoid).fillna(0).astype(int)
         band_pops = population_in_bands(bands, bgs)
         pops_by_year[year] = band_pops
+        if EMIT_TRACTS:
+            tract_pops_by_year[year] = interpolate_into(tracts, bgs, widest_geom)
         if year == CURRENT_BASE_YEAR:
             base_bgs = bgs
         log(f"  {year} per-band cumulative: " + ", ".join(f"{k}min={v:,}" for k, v in sorted(band_pops.items())))
@@ -474,16 +622,30 @@ def main() -> None:
         scaled["pop"] = (scaled["pop"] * county_factor).round().astype(int)
         band_pops = population_in_bands(bands, scaled)
         pops_by_year[current_year] = band_pops
+        if EMIT_TRACTS:
+            tract_pops_by_year[current_year] = interpolate_into(tracts, scaled, widest_geom)
         log(f"  {current_year} per-band cumulative: " + ", ".join(f"{k}min={v:,}" for k, v in sorted(band_pops.items())))
 
     out = build_output(meta, pops_by_year, years, current_year, PEP_VINTAGE)
     summary = f"years={years} bands={len(out['bands'])}"
+    tracts_fc = None
+    if EMIT_TRACTS:
+        if GROWTH_BASE_YEAR not in tract_pops_by_year:
+            log(f"WARNING: growth base year {GROWTH_BASE_YEAR} not in YEARS; growth will be null.")
+        tracts_fc = build_tracts(tracts, tract_pops_by_year, GROWTH_BASE_YEAR)
+
     if DRY_RUN:
         log(f"[dry-run] would write {OUTPUT_PATH}: {summary}")
+        if tracts_fc is not None:
+            log(f"[dry-run] would write {TRACTS_OUTPUT_PATH}: tracts={len(tracts_fc['features'])}")
         return
 
     write_json(OUTPUT_PATH, out)
     log(f"Wrote {OUTPUT_PATH}: {summary}")
+    if tracts_fc is not None:
+        write_json(TRACTS_OUTPUT_PATH, tracts_fc)
+        log(f"Wrote {TRACTS_OUTPUT_PATH}: tracts={len(tracts_fc['features'])} "
+            f"growth-years={tracts_fc['properties']['years']}")
 
 
 if __name__ == "__main__":

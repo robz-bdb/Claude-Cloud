@@ -12,7 +12,21 @@
   />
   <style>
     html, body { margin: 0; height: 100%; }
-    #map { height: 100vh; width: 100%; }
+    body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
+
+    /* Tabs */
+    #tabs { flex: 0 0 auto; display: flex; gap: 4px; padding: 6px 8px 0; background: #222; }
+    .tab {
+      font: 13px system-ui, sans-serif; background: #3a3a3a; color: #ddd; border: 0;
+      padding: 8px 16px; border-radius: 6px 6px 0 0; cursor: pointer;
+    }
+    .tab.active { background: #fff; color: #111; font-weight: 600; }
+
+    #views { position: relative; flex: 1 1 auto; }
+    .view { position: absolute; inset: 0; }
+    #view-growth { overflow: auto; background: #f4f4f4; padding: 12px; display: none; }
+
+    #map { height: 100%; width: 100%; }
     .panel {
       font: 14px/1.4 system-ui, sans-serif;
       background: rgba(255, 255, 255, 0.92);
@@ -51,21 +65,60 @@
       margin-right: 5px; opacity: 0.7; vertical-align: middle;
     }
     .pop-box .src { margin-top: 6px; font-size: 11px; color: #666; }
+
+    /* Growth heat maps */
+    .growth-head { margin-bottom: 10px; }
+    .growth-head h2 { margin: 0 0 4px; font-size: 16px; }
+    .growth-head p { margin: 0 0 8px; color: #444; font-size: 12px; max-width: 760px; }
+    .growth-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
+    .growth-legend span { display: inline-flex; align-items: center; }
+    .growth-legend i {
+      width: 14px; height: 14px; margin-right: 5px; display: inline-block; border: 1px solid #999;
+    }
+    .sm-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+    .sm-card {
+      background: #fff; border-radius: 6px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); padding: 8px;
+    }
+    .sm-card h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+    .sm-map { width: 340px; height: 340px; max-width: 86vw; background: #fff; }
   </style>
 </head>
 <body>
-  <div id="map"></div>
-  <div class="title-box panel">
-    <h1>Drive time to the Bell County Expo Center</h1>
-    <p>Cadence Bank Arena &middot; 301 W Loop 121, Belton, TX. Bands show how far
-       you can drive in each time window.</p>
+  <div id="tabs">
+    <button id="tab-map" class="tab active" type="button" onclick="showView('map')">Map</button>
+    <button id="tab-growth" class="tab" type="button" onclick="showView('growth')" style="display:none">
+      Growth heat maps
+    </button>
   </div>
-  <div id="approx" class="approx-banner panel">
-    Showing <strong>approximate</strong> bands (avg 35 mph straight-line).
-    Regenerate <code>isochrones.geojson</code> with an ORS_API_KEY for real
-    road-network drive times.
+
+  <div id="views">
+    <div id="view-map" class="view">
+      <div id="map"></div>
+      <div class="title-box panel">
+        <h1>Drive time to the Bell County Expo Center</h1>
+        <p>Cadence Bank Arena &middot; 301 W Loop 121, Belton, TX. Bands show how far
+           you can drive in each time window.</p>
+      </div>
+      <div id="approx" class="approx-banner panel">
+        Showing <strong>approximate</strong> bands (avg 35 mph straight-line).
+        Regenerate <code>isochrones.geojson</code> with an ORS_API_KEY for real
+        road-network drive times.
+      </div>
+      <div id="pop" class="pop-box panel"></div>
+    </div>
+
+    <div id="view-growth" class="view">
+      <div class="growth-head panel">
+        <h2>Population growth heat maps</h2>
+        <p>Each census tract shaded by its <strong>% population growth since
+           <span id="g-base">2010</span></strong>. Tracts use a fixed 2020 geography;
+           each year's population is areal-interpolated into them, so the panels are
+           directly comparable. The 2024 panel uses the PEP-based current-year estimate.</p>
+        <div id="growth-legend" class="growth-legend"></div>
+      </div>
+      <div id="sm-grid" class="sm-grid"></div>
+    </div>
   </div>
-  <div id="pop" class="pop-box panel"></div>
 
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -195,6 +248,109 @@
       .catch(() => {
         /* No population.json yet — leave the panel hidden. */
       });
+
+    // ---- Growth heat maps (small multiples per year) ----------------------
+    let growthData = null;     // { tracts, iso } once fetched
+    let growthRendered = false;
+
+    // Diverging-ish ramp keyed at 0% growth; purple = "new" (no 2010 base).
+    function growthColor(pct, base) {
+      if (base === 0) return "#54278f";   // brand-new tract (no 2010 population)
+      if (pct == null) return "#dddddd";  // unknown
+      if (pct < 0) return "#2c7bb6";      // decline
+      if (pct < 10) return "#ffffcc";
+      if (pct < 25) return "#fed976";
+      if (pct < 50) return "#fd8d3c";
+      if (pct < 100) return "#e31a1c";
+      return "#800026";                   // 100%+
+    }
+    const GROWTH_LEGEND = [
+      ["#2c7bb6", "decline"], ["#ffffcc", "0–10%"], ["#fed976", "10–25%"],
+      ["#fd8d3c", "25–50%"], ["#e31a1c", "50–100%"], ["#800026", "100%+"],
+      ["#54278f", "new since 2010"],
+    ];
+
+    function renderGrowthLegend() {
+      document.getElementById("growth-legend").innerHTML = GROWTH_LEGEND
+        .map(([c, l]) => '<span><i style="background:' + c + '"></i>' + l + "</span>")
+        .join("");
+    }
+
+    function renderGrowth() {
+      if (growthRendered || !growthData) return;
+      growthRendered = true;
+      const { tracts, iso } = growthData;
+      const props = tracts.properties || {};
+      const years = props.years || [];
+      document.getElementById("g-base").textContent = props.base_year || 2010;
+
+      // Widest drive-time band: reference outline + shared bounds for every panel.
+      const isoFeats = (iso.features || []).slice()
+        .sort((a, b) => b.properties.minutes - a.properties.minutes);
+      const widest = isoFeats[0];
+      const bounds = widest ? L.geoJSON(widest).getBounds() : null;
+
+      const grid = document.getElementById("sm-grid");
+      years.forEach((y) => {
+        const card = document.createElement("div");
+        card.className = "sm-card";
+        const h = document.createElement("h3");
+        h.textContent = y + " — growth since " + (props.base_year || 2010);
+        const md = document.createElement("div");
+        md.className = "sm-map";
+        md.id = "gmap-" + y;
+        card.appendChild(h);
+        card.appendChild(md);
+        grid.appendChild(card);
+
+        const m = L.map(md, {
+          renderer: L.canvas(), zoomControl: false, attributionControl: false,
+          dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
+          boxZoom: false, keyboard: false, touchZoom: false,
+        });
+        L.geoJSON(tracts, {
+          style: (f) => ({
+            stroke: false,
+            fillColor: growthColor(f.properties.growth[String(y)], f.properties.pop_base),
+            fillOpacity: 0.85,
+          }),
+          onEachFeature: (f, layer) => {
+            const g = f.properties.growth[String(y)];
+            const txt = f.properties.pop_base === 0
+              ? "new since " + (props.base_year || 2010)
+              : (g == null ? "n/a" : (g >= 0 ? "+" : "") + g + "%");
+            layer.bindTooltip(txt, { sticky: true });
+          },
+        }).addTo(m);
+        if (widest) {
+          L.geoJSON(widest, { style: { color: "#333", weight: 1, fill: false, opacity: 0.7 } }).addTo(m);
+        }
+        L.circleMarker(ARENA, { radius: 3, color: "#000", fillColor: "#000", fillOpacity: 1 }).addTo(m);
+        if (bounds) m.fitBounds(bounds, { padding: [6, 6] });
+        m.invalidateSize();
+      });
+    }
+
+    function showView(name) {
+      document.querySelectorAll(".view").forEach((v) => (v.style.display = "none"));
+      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      document.getElementById("view-" + name).style.display = "block";
+      document.getElementById("tab-" + name).classList.add("active");
+      if (name === "map") setTimeout(() => map.invalidateSize(), 0);
+      if (name === "growth") renderGrowth();
+    }
+
+    // Show the Growth tab only once we know the artifact exists; render lazily.
+    renderGrowthLegend();
+    fetch("growth_tracts.geojson")
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then((tracts) =>
+        fetch("isochrones.geojson").then((r) => r.json()).then((iso) => {
+          growthData = { tracts, iso };
+          document.getElementById("tab-growth").style.display = "";
+        })
+      )
+      .catch(() => { /* no growth_tracts.geojson yet — leave the Growth tab hidden */ });
   </script>
 </body>
 </html>
