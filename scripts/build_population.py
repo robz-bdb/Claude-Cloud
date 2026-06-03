@@ -221,29 +221,38 @@ def fetch_pep_factors(base_year: int, current_year: int, vintage: str) -> dict:
     The decennial/ACS products lag the present; PEP publishes point-in-time
     July-1 county estimates each year. We use the per-county base->current ratio
     to age the base-year block groups forward (uniform growth within a county).
+
+    The Census *API* does not expose recent PEP vintages, but the county totals
+    are published as a flat CSV on the FTP server (same host as the TIGER
+    geometry), so we read that. Override with PEP_CSV_URL if the path changes.
     """
-    rows = census_get(
-        f"{CENSUS_BASE}/{vintage}/pep/population",
-        {
-            "get": f"NAME,POP_{base_year},POP_{current_year}",
-            "for": "county:*",
-            "in": f"state:{STATE_FIPS}",
-            "key": CENSUS_API_KEY,
-        },
+    import csv
+    import io
+
+    url = os.environ.get("PEP_CSV_URL") or (
+        f"https://www2.census.gov/programs-surveys/popest/datasets/"
+        f"{base_year}-{vintage}/counties/totals/co-est{vintage}-alldata.csv"
     )
-    header = rows[0]
-    bi, ci = header.index(f"POP_{base_year}"), header.index(f"POP_{current_year}")
-    coi = header.index("county")
+    log(f"  PEP totals CSV: {url}")
+    resp = requests.get(url, timeout=120)
+    if resp.status_code != 200:
+        fail(f"PEP CSV download failed ({resp.status_code}): {url}")
+    reader = csv.DictReader(io.StringIO(resp.content.decode("latin-1")))
+    bcol, ccol = f"POPESTIMATE{base_year}", f"POPESTIMATE{current_year}"
+    if reader.fieldnames is None or bcol not in reader.fieldnames or ccol not in reader.fieldnames:
+        fail(f"PEP CSV missing {bcol}/{ccol}; columns: {reader.fieldnames}")
     factors: dict[str, float] = {}
-    for r in rows[1:]:
+    for row in reader:
+        if row.get("STATE") != STATE_FIPS or row.get("SUMLEV") != "050":
+            continue  # county rows in the target state only
         try:
-            base, cur = float(r[bi]), float(r[ci])
+            base, cur = float(row[bcol]), float(row[ccol])
         except (TypeError, ValueError):
             continue
-        if base > 0:
-            factors[r[coi]] = cur / base
+        if base > 0 and row.get("COUNTY"):
+            factors[row["COUNTY"]] = cur / base
     if not factors:
-        fail(f"PEP returned no usable county factors for vintage {vintage}.")
+        fail(f"PEP CSV had no usable county rows for state {STATE_FIPS}: {url}")
     log(f"  PEP v{vintage}: {len(factors)} county factors, base {base_year} -> {current_year}")
     return factors
 
