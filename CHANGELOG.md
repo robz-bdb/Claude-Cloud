@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-03
+
 ### Drive-time isochrone map
 
 - **Added** a `2024 (current)` population column: each 2020 block group is aged by
@@ -68,5 +70,6 @@ First tagged release. Two small, independent components live in this repo.
 - **Added** the `Notion emoji tagger` workflow (scheduled, plus a manual
   dry-run trigger).
 
-[Unreleased]: https://github.com/robz-bdb/Claude-Cloud/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/robz-bdb/Claude-Cloud/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/robz-bdb/Claude-Cloud/compare/v1.0.0...v2.1.0
 [1.0.0]: https://github.com/robz-bdb/Claude-Cloud/releases/tag/v1.0.0
