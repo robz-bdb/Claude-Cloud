@@ -81,6 +81,12 @@
     }
     .sm-card h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
     .sm-map { width: 340px; height: 340px; max-width: 86vw; background: #fff; }
+    .city-label {
+      background: transparent; border: none; box-shadow: none; padding: 0;
+      color: #111; font: 600 11px system-ui, sans-serif;
+      text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff;
+    }
+    .city-label::before { display: none; }
   </style>
 </head>
 <body>
@@ -115,8 +121,9 @@
            each year's population is areal-interpolated into them, so the panels are
            directly comparable. The 2024 panel uses the PEP-based current-year estimate.
            Grey outlines are the 10 / 20 / 30 / 40 / 60-minute drive-time bands
-           (distance from the arena ●).</p>
+           (distance from the arena, red ●). Black dots are cities, sized by population.</p>
         <div id="growth-legend" class="growth-legend"></div>
+        <div id="city-legend" class="growth-legend" style="margin-top: 6px"></div>
       </div>
       <div id="sm-grid" class="sm-grid"></div>
     </div>
@@ -134,6 +141,55 @@
       maxZoom: 19,
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
+
+    // ---- Cities (shared by the Map tab and the Growth panels) -------------
+    // [name, lat, lon, 2020 census population]
+    const CITIES = [
+      ["Austin", 30.267, -97.743, 961855], ["Killeen", 31.117, -97.727, 153095],
+      ["Waco", 31.549, -97.147, 138486], ["Round Rock", 30.508, -97.679, 119468],
+      ["Temple", 31.099, -97.343, 82073], ["Cedar Park", 30.505, -97.820, 77595],
+      ["Georgetown", 30.633, -97.677, 67176], ["Pflugerville", 30.439, -97.620, 65191],
+      ["Leander", 30.578, -97.853, 59202], ["Copperas Cove", 31.124, -97.911, 36323],
+      ["Harker Heights", 31.080, -97.660, 33097], ["Hutto", 30.543, -97.547, 27947],
+      ["Belton", 31.056, -97.464, 23054], ["Taylor", 30.570, -97.409, 16267],
+      ["Gatesville", 31.435, -97.745, 15751], ["Lampasas", 31.063, -98.182, 7700],
+      ["Cameron", 30.853, -96.978, 5560],
+    ];
+    const CITY_TIERS = [
+      { min: 250000, r: 9, label: "250k+" },
+      { min: 100000, r: 7, label: "100–250k" },
+      { min: 50000, r: 5, label: "50–100k" },
+      { min: 0, r: 3.5, label: "under 50k" },
+    ];
+    const cityTier = (pop) => CITY_TIERS.find((t) => pop >= t.min);
+    function citySwatches() {
+      return CITY_TIERS.map((t) => {
+        const d = Math.round(t.r * 2);
+        return '<span style="display:inline-flex;align-items:center;margin-right:12px">' +
+          '<i style="display:inline-block;width:' + d + "px;height:" + d + "px;border-radius:50%;" +
+          'background:#1b1b1b;border:1px solid #fff;margin-right:5px"></i>' + t.label + "</span>";
+      }).join("");
+    }
+
+    // City markers on the Map tab, sized by population tier.
+    CITIES.forEach((c) => {
+      const t = cityTier(c[3]);
+      const mk = L.circleMarker([c[1], c[2]], {
+        radius: t.r, fillColor: "#1b1b1b", color: "#fff", weight: 1, fillOpacity: 0.9,
+      }).addTo(map);
+      if (c[3] >= 50000) {
+        mk.bindTooltip(c[0], { permanent: true, direction: "right", className: "city-label", offset: [t.r, 0] });
+      } else {
+        mk.bindTooltip(c[0] + " · " + c[3].toLocaleString());
+      }
+    });
+    const cityLegend = L.control({ position: "bottomleft" });
+    cityLegend.onAdd = function () {
+      const div = L.DomUtil.create("div", "legend panel");
+      div.innerHTML = '<strong>City population</strong><div style="margin-top:4px">' + citySwatches() + "</div>";
+      return div;
+    };
+    cityLegend.addTo(map);
 
     function style(feature) {
       return {
@@ -385,11 +441,36 @@
             svg.appendChild(t);
           }
         });
-        const a = project(ARENA[1], ARENA[0]); // ARENA is [lat, lon]
-        const dot = document.createElementNS(SVGNS, "circle");
-        dot.setAttribute("cx", a[0]); dot.setAttribute("cy", a[1]);
-        dot.setAttribute("r", "3"); dot.setAttribute("fill", "#000");
-        svg.appendChild(dot);
+        // Cities sized by population (hover for name + count); labels for the big ones.
+        CITIES.forEach((c) => {
+          const xy = project(c[2], c[1]);
+          if (xy[0] < 0 || xy[0] > W || xy[1] < 0 || xy[1] > H) return;
+          const t = cityTier(c[3]);
+          const cc = document.createElementNS(SVGNS, "circle");
+          cc.setAttribute("cx", xy[0].toFixed(1)); cc.setAttribute("cy", xy[1].toFixed(1));
+          cc.setAttribute("r", (t.r * 0.7).toFixed(1));
+          cc.setAttribute("fill", "#1b1b1b"); cc.setAttribute("stroke", "#fff"); cc.setAttribute("stroke-width", "0.8");
+          const ct = document.createElementNS(SVGNS, "title");
+          ct.textContent = c[0] + " · " + c[3].toLocaleString();
+          cc.appendChild(ct);
+          svg.appendChild(cc);
+          if (c[3] >= 100000) {
+            const tx = document.createElementNS(SVGNS, "text");
+            tx.setAttribute("x", (xy[0] + t.r * 0.7 + 2).toFixed(1));
+            tx.setAttribute("y", (xy[1] + 3).toFixed(1));
+            tx.setAttribute("font-size", "8");
+            tx.setAttribute("fill", "#111"); tx.setAttribute("stroke", "#fff");
+            tx.setAttribute("stroke-width", "2"); tx.setAttribute("paint-order", "stroke");
+            tx.textContent = c[0];
+            svg.appendChild(tx);
+          }
+        });
+        const a = project(ARENA[1], ARENA[0]); // ARENA is [lat, lon]; red = arena
+        const arena = document.createElementNS(SVGNS, "circle");
+        arena.setAttribute("cx", a[0]); arena.setAttribute("cy", a[1]);
+        arena.setAttribute("r", "4"); arena.setAttribute("fill", "#d7191c");
+        arena.setAttribute("stroke", "#fff"); arena.setAttribute("stroke-width", "1");
+        svg.appendChild(arena);
 
         card.appendChild(svg);
         grid.appendChild(card);
@@ -407,6 +488,11 @@
 
     // Show the Growth tab only once we know the artifact exists; render lazily.
     renderGrowthLegend();
+    const _cityLegendEl = document.getElementById("city-legend");
+    if (_cityLegendEl) {
+      _cityLegendEl.innerHTML =
+        '<span style="font-weight:600;margin-right:6px">City size:</span>' + citySwatches();
+    }
     fetch("growth_tracts.geojson")
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then((tracts) =>
