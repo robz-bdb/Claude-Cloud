@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tract geography so the yearly panels are comparable; tract geometry is simplified
   and coordinate-rounded to keep the artifact lean. Configurable via
   `EMIT_TRACTS` / `TRACT_GEO_YEAR` / `GROWTH_BASE_YEAR` / `TRACT_SIMPLIFY`.
+- **Fixed** the Growth tab rendering — the per-year panels are now inline SVG
+  choropleths instead of multiple Leaflet maps, avoiding a hidden-tab sizing bug
+  that left the panels blank (only the first card appeared).
 
 ## [2.1.0] - 2026-06-03
 

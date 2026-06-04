@@ -282,52 +282,89 @@
       const { tracts, iso } = growthData;
       const props = tracts.properties || {};
       const years = props.years || [];
-      document.getElementById("g-base").textContent = props.base_year || 2010;
+      const baseYear = props.base_year || 2010;
+      document.getElementById("g-base").textContent = baseYear;
+      const SVGNS = "http://www.w3.org/2000/svg";
 
-      // Widest drive-time band: reference outline + shared bounds for every panel.
+      // Polygon -> [rings]; MultiPolygon -> all polygons' rings flattened.
+      const geomRings = (g) =>
+        g.type === "Polygon" ? g.coordinates
+          : g.type === "MultiPolygon" ? g.coordinates.flat() : [];
+
+      // Widest drive-time band: bounding box (projection extent) + outline.
       const isoFeats = (iso.features || []).slice()
         .sort((a, b) => b.properties.minutes - a.properties.minutes);
       const widest = isoFeats[0];
-      const bounds = widest ? L.geoJSON(widest).getBounds() : null;
+      const wrings = widest ? geomRings(widest.geometry) : [];
+      let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+      wrings.forEach((r) => r.forEach((p) => {
+        if (p[0] < minLon) minLon = p[0]; if (p[0] > maxLon) maxLon = p[0];
+        if (p[1] < minLat) minLat = p[1]; if (p[1] > maxLat) maxLat = p[1];
+      }));
+      const padLon = (maxLon - minLon) * 0.02, padLat = (maxLat - minLat) * 0.02;
+      minLon -= padLon; maxLon += padLon; minLat -= padLat; maxLat += padLat;
+      const W = 320;
+      const cosLat = Math.cos(((minLat + maxLat) / 2) * Math.PI / 180);
+      const H = Math.max(160, Math.round(W * (maxLat - minLat) / ((maxLon - minLon) * cosLat)));
+      const project = (lon, lat) =>
+        [(lon - minLon) / (maxLon - minLon) * W, H - (lat - minLat) / (maxLat - minLat) * H];
+      const pathD = (rings) => {
+        let d = "";
+        rings.forEach((ring) => {
+          ring.forEach((pt, i) => {
+            const xy = project(pt[0], pt[1]);
+            d += (i ? "L" : "M") + xy[0].toFixed(1) + "," + xy[1].toFixed(1);
+          });
+          d += "Z";
+        });
+        return d;
+      };
 
       const grid = document.getElementById("sm-grid");
       years.forEach((y) => {
         const card = document.createElement("div");
         card.className = "sm-card";
         const h = document.createElement("h3");
-        h.textContent = y + " — growth since " + (props.base_year || 2010);
-        const md = document.createElement("div");
-        md.className = "sm-map";
-        md.id = "gmap-" + y;
+        h.textContent = y + " — growth since " + baseYear;
         card.appendChild(h);
-        card.appendChild(md);
-        grid.appendChild(card);
 
-        const m = L.map(md, {
-          renderer: L.canvas(), zoomControl: false, attributionControl: false,
-          dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
-          boxZoom: false, keyboard: false, touchZoom: false,
+        const svg = document.createElementNS(SVGNS, "svg");
+        svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+        svg.setAttribute("width", W);
+        svg.setAttribute("height", H);
+        svg.style.maxWidth = "90vw";
+        svg.style.height = "auto";
+        svg.style.background = "#fff";
+
+        tracts.features.forEach((f) => {
+          const g = f.properties.growth[String(y)];
+          const path = document.createElementNS(SVGNS, "path");
+          path.setAttribute("d", pathD(geomRings(f.geometry)));
+          path.setAttribute("fill", growthColor(g, f.properties.pop_base));
+          path.setAttribute("fill-rule", "evenodd");
+          const title = document.createElementNS(SVGNS, "title");
+          title.textContent = f.properties.pop_base === 0
+            ? "new since " + baseYear
+            : (g == null ? "n/a" : (g >= 0 ? "+" : "") + g + "%");
+          path.appendChild(title);
+          svg.appendChild(path);
         });
-        L.geoJSON(tracts, {
-          style: (f) => ({
-            stroke: false,
-            fillColor: growthColor(f.properties.growth[String(y)], f.properties.pop_base),
-            fillOpacity: 0.85,
-          }),
-          onEachFeature: (f, layer) => {
-            const g = f.properties.growth[String(y)];
-            const txt = f.properties.pop_base === 0
-              ? "new since " + (props.base_year || 2010)
-              : (g == null ? "n/a" : (g >= 0 ? "+" : "") + g + "%");
-            layer.bindTooltip(txt, { sticky: true });
-          },
-        }).addTo(m);
-        if (widest) {
-          L.geoJSON(widest, { style: { color: "#333", weight: 1, fill: false, opacity: 0.7 } }).addTo(m);
+        if (wrings.length) {
+          const o = document.createElementNS(SVGNS, "path");
+          o.setAttribute("d", pathD(wrings));
+          o.setAttribute("fill", "none");
+          o.setAttribute("stroke", "#333");
+          o.setAttribute("stroke-width", "1");
+          svg.appendChild(o);
         }
-        L.circleMarker(ARENA, { radius: 3, color: "#000", fillColor: "#000", fillOpacity: 1 }).addTo(m);
-        if (bounds) m.fitBounds(bounds, { padding: [6, 6] });
-        m.invalidateSize();
+        const a = project(ARENA[1], ARENA[0]); // ARENA is [lat, lon]
+        const dot = document.createElementNS(SVGNS, "circle");
+        dot.setAttribute("cx", a[0]); dot.setAttribute("cy", a[1]);
+        dot.setAttribute("r", "3"); dot.setAttribute("fill", "#000");
+        svg.appendChild(dot);
+
+        card.appendChild(svg);
+        grid.appendChild(card);
       });
     }
 
