@@ -113,7 +113,9 @@
         <p>Each census tract shaded by its <strong>% population growth since
            <span id="g-base">2010</span></strong>. Tracts use a fixed 2020 geography;
            each year's population is areal-interpolated into them, so the panels are
-           directly comparable. The 2024 panel uses the PEP-based current-year estimate.</p>
+           directly comparable. The 2024 panel uses the PEP-based current-year estimate.
+           Grey outlines are the 10 / 20 / 30 / 40 / 60-minute drive-time bands
+           (distance from the arena ●).</p>
         <div id="growth-legend" class="growth-legend"></div>
       </div>
       <div id="sm-grid" class="sm-grid"></div>
@@ -320,6 +322,15 @@
         return d;
       };
 
+      // Drive-time band outlines = distance-from-arena reference lines. The
+      // northernmost vertex of each band positions its minute label.
+      const bandOutlines = isoFeats.map((f) => {
+        const rings = geomRings(f.geometry);
+        let north = null;
+        rings.forEach((r) => r.forEach((p) => { if (!north || p[1] > north[1]) north = p; }));
+        return { rings, minutes: f.properties.minutes, north };
+      });
+
       const grid = document.getElementById("sm-grid");
       years.forEach((y) => {
         const card = document.createElement("div");
@@ -342,6 +353,7 @@
           path.setAttribute("d", pathD(geomRings(f.geometry)));
           path.setAttribute("fill", growthColor(g, f.properties.pop_base));
           path.setAttribute("fill-rule", "evenodd");
+          path.setAttribute("fill-opacity", "0.55");
           const title = document.createElementNS(SVGNS, "title");
           title.textContent = f.properties.pop_base === 0
             ? "new since " + baseYear
@@ -349,14 +361,30 @@
           path.appendChild(title);
           svg.appendChild(path);
         });
-        if (wrings.length) {
+        bandOutlines.forEach((b) => {
           const o = document.createElementNS(SVGNS, "path");
-          o.setAttribute("d", pathD(wrings));
+          o.setAttribute("d", pathD(b.rings));
           o.setAttribute("fill", "none");
           o.setAttribute("stroke", "#333");
           o.setAttribute("stroke-width", "1");
+          o.setAttribute("stroke-opacity", "0.8");
           svg.appendChild(o);
-        }
+          if (b.north) {
+            const xy = project(b.north[0], b.north[1]);
+            const t = document.createElementNS(SVGNS, "text");
+            t.setAttribute("x", xy[0].toFixed(1));
+            t.setAttribute("y", Math.max(10, xy[1] + 3).toFixed(1));
+            t.setAttribute("text-anchor", "middle");
+            t.setAttribute("font-size", "9");
+            t.setAttribute("font-weight", "600");
+            t.setAttribute("fill", "#111");
+            t.setAttribute("stroke", "#fff");
+            t.setAttribute("stroke-width", "2.5");
+            t.setAttribute("paint-order", "stroke");
+            t.textContent = b.minutes + " min";
+            svg.appendChild(t);
+          }
+        });
         const a = project(ARENA[1], ARENA[0]); // ARENA is [lat, lon]
         const dot = document.createElementNS(SVGNS, "circle");
         dot.setAttribute("cx", a[0]); dot.setAttribute("cy", a[1]);
