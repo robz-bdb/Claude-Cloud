@@ -1,6 +1,2 @@
 requests>=2.31,<3
 anthropic>=0.40,<1
-# Build-time only (scripts/build_population.py); the published map uses none of these.
-geopandas>=1.0,<2
-shapely>=2.0,<3
-pyproj>=3.6,<4

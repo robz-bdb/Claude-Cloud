@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Moved** the entire drive-time isochrone map out of this repo into
+  [`robz-bdb/stampede-hockey-mapping`](https://github.com/robz-bdb/stampede-hockey-mapping)
+  (live map now at <https://robz-bdb.github.io/stampede-hockey-mapping/>). The map's
+  scripts (`build_isochrones.py`, `build_population.py`), the `docs/` site, and the
+  `Build isochrones` / `Build population` / `Deploy Pages` workflows were deleted here,
+  and the build-time `geopandas`/`shapely`/`pyproj` dependencies dropped. This repo now
+  contains only the Notion emoji tagger. The isochrone entries below (including the
+  in-progress Growth tab) record work done while the map still lived here.
+
 ### Drive-time isochrone map
 
 - **Added** a **Growth** tab to the map — small-multiple census-tract heat maps (one
