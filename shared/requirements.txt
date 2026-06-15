@@ -1,0 +1,4 @@
+# Shared baseline deps for the sandbox helper lib (sandbox.clients).
+# A project only needs these if it imports the matching client factory.
+requests>=2.31,<3
+anthropic>=0.40,<1

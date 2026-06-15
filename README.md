@@ -1,85 +1,55 @@
-# Notion task emoji tagger
+# Claude-Cloud
 
-A daily automation that gives your TickTick-synced Notion tasks a little
-personality. Every night it scans the **`tasks-db`** Notion page's inline
-**"All Tasks"** database, finds every **incomplete** task (Checkbox unchecked)
-whose title doesn't already start with an emoji, asks Claude for a fitting emoji,
-and prepends it to the task title:
+A **pop-in Claude Code sandbox** — a monorepo of small, independent projects.
+Each project lives in its own folder under [`projects/`](projects/) with its own
+code, docs, and dependencies. The only thing projects share is the tooling and
+keys in [`shared/`](shared/).
+
+The idea: **one context window ≈ one project**. Pop into a fresh Claude Code
+session aimed at this repo and it's assumed to be a *new* project; keep working
+existing projects in their own sessions.
+
+## Layout
 
 ```
-Buy groceries        ->  🛒 Buy groceries
-Email the landlord   ->  📧 Email the landlord
-Morning run          ->  🏃 Morning run
+projects/
+  _template/            scaffold for a new project
+  notion-emoji-tagger/  daily Notion task emoji tagger
+shared/                 reusable helpers (the `sandbox` package) + shared deps
+.env.example            shared keys; copy to .env for local runs
+CLAUDE.md               sandbox conventions for Claude Code
 ```
 
-> Because the Notion ↔ TickTick sync is **bidirectional on the title**, the emoji
-> also shows up on the task in TickTick.
-
-## How it works
-
-- [`scripts/tag_tasks_with_emoji.py`](scripts/tag_tasks_with_emoji.py) does the
-  work: query Notion → filter → ask Claude for emojis (one batched call) →
-  prepend to each title. It is idempotent — titles already starting with an
-  emoji are skipped, so re-runs never double-tag.
-- [`.github/workflows/notion-emoji-tagger.yml`](.github/workflows/notion-emoji-tagger.yml)
-  runs it on a schedule. GitHub cron is UTC with no DST handling, so it triggers
-  at **06:00 and 07:00 UTC** and the script's `America/Chicago` guard only does
-  work when the local hour is 1 — exactly **1 AM US Central** year-round.
-
-## One-time setup
-
-1. **Create a Notion integration** at <https://www.notion.so/my-integrations>
-   (internal integration) and copy its token (`ntn_...`).
-2. **Share the database with it:** open the `tasks-db` page in Notion →
-   **•••** menu → **Connections** → add your integration. This is required —
-   the integration can only see pages explicitly shared with it.
-3. **Add GitHub repository secrets** (Settings → Secrets and variables →
-   Actions → *New repository secret*):
-   - `NOTION_TOKEN` — the integration token from step 1
-   - `ANTHROPIC_API_KEY` — an Anthropic API key from <https://console.anthropic.com>
-
-That's it. The scheduled run starts working the next night.
-
-## Testing it
-
-Use the manual trigger first — it defaults to a safe **dry run** (logs intended
-changes, writes nothing):
-
-- GitHub → **Actions** → *Notion emoji tagger* → **Run workflow** →
-  leave *dry_run* checked → **Run**. Inspect the logs.
-- Run it again with *dry_run* **unchecked** to apply the changes, then check a
-  few tasks in Notion.
-
-### Running locally
+## Start a new project
 
 ```bash
-pip install -r requirements.txt
-
-export NOTION_TOKEN="ntn_..."
-export ANTHROPIC_API_KEY="sk-ant-..."
-export DRY_RUN=1        # log only, no writes
-export FORCE_RUN=1      # bypass the 1 AM Central time guard
-
-python scripts/tag_tasks_with_emoji.py
+cp -r projects/_template projects/<your-kebab-case-name>
+# fill in its CLAUDE.md / README.md, then build in projects/<name>/src/
 ```
 
-## Configuration
+New projects get the shared tooling wired up for free — see the bootstrap import
+in `projects/_template/src/main.py`.
 
-All configuration is via environment variables:
+## Shared tooling & keys
 
-| Variable              | Required | Default                              | Purpose |
-|-----------------------|----------|--------------------------------------|---------|
-| `NOTION_TOKEN`        | yes      | —                                    | Notion integration token |
-| `ANTHROPIC_API_KEY`   | yes      | —                                    | Anthropic API key |
-| `TASKS_DB_ID`         | no       | `b971e3b6eebb83cc91450191f70d4278`   | The "All Tasks" database ID |
-| `TITLE_PROPERTY`      | no       | `Title`                              | Title property name |
-| `COMPLETION_PROPERTY` | no       | `Checkbox`                           | Checkbox property marking completion |
-| `DRY_RUN`             | no       | `false`                              | Log changes without writing |
-| `FORCE_RUN`           | no       | `false`                              | Skip the 1 AM Central time guard |
+- **Tooling:** [`shared/`](shared/README.md) exposes the importable `sandbox`
+  package — env loading (`sandbox.env`) and API client factories
+  (`sandbox.clients` → Anthropic, Notion). Any project can import it.
+- **Keys:** defined once, never per project. For local runs, copy `.env.example`
+  to `.env` (git-ignored) and fill it in; `sandbox.env.load_env()` reads it. In
+  CI, the same values come from GitHub Actions repository secrets. Current shared
+  keys: `NOTION_TOKEN`, `ANTHROPIC_API_KEY`.
+
+## Projects
+
+- **[notion-emoji-tagger](projects/notion-emoji-tagger/README.md)** — a daily
+  automation that prepends a contextually-chosen emoji to incomplete,
+  TickTick-synced Notion task titles via a single batched Anthropic call.
+  Idempotent, DST-safe 1 AM US-Central schedule.
 
 ---
 
-> **Moved:** the drive-time isochrone map and its population/growth layers that used to
-> live here now have their own home at
+> **Moved:** the drive-time isochrone map that used to live here now has its own
+> home at
 > [`robz-bdb/stampede-hockey-mapping`](https://github.com/robz-bdb/stampede-hockey-mapping)
 > (live map: <https://robz-bdb.github.io/stampede-hockey-mapping/>).

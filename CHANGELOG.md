@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Restructured the repo into a pop-in Claude Code sandbox** — a monorepo of
+  small, independent projects under `projects/<name>/`, one project per context
+  window. The Notion emoji tagger moved from the repo root into
+  `projects/notion-emoji-tagger/` (script, `requirements.txt`, `README.md`, and
+  project `CLAUDE.md`), with no change to its logic; the `Notion emoji tagger`
+  workflow now runs with `working-directory: projects/notion-emoji-tagger`.
+- **Added** a sandbox-wide root `CLAUDE.md` (conventions + new-project protocol),
+  a rewritten root `README.md`, a `projects/_template/` scaffold, and a `shared/`
+  helper package (`sandbox.env`, `sandbox.clients`) so projects share env loading,
+  API clients, and keys (`.env.example`) instead of duplicating them.
+
 ### Removed
 
 - **Moved** the entire drive-time isochrone map out of this repo into

@@ -2,3 +2,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+projects/*/.venv/
+projects/*/venv/
+
+# Local secrets (use .env.example as the template; never commit real keys)
+.env

@@ -1,0 +1,3 @@
+# Project dependencies go here.
+# If you use the shared client factories (sandbox.clients), also install
+# shared/requirements.txt — or copy the lines you need (requests, anthropic).
