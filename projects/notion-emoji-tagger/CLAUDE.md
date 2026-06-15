@@ -44,7 +44,10 @@ The tagger, intentionally small:
   drop empty/already-emoji titles → one batched Anthropic call returns an emoji
   per title → `PATCH` each page's title. It talks to the Notion REST API directly
   (not the MCP connector, which is interactive-session-only) and to Claude via the
-  `anthropic` SDK.
+  `anthropic` SDK — both through the sandbox's shared `sandbox.clients` factories
+  (`notion_session()`, `anthropic_client()`); keys load via `sandbox.env.load_env()`.
+  A small `sys.path` bootstrap at the top of the script locates `shared/` so the
+  `sandbox` package imports regardless of working directory.
 - **`.github/workflows/notion-emoji-tagger.yml`** — the scheduler. Installs deps
   and runs the script with secrets in env.
 
@@ -77,6 +80,7 @@ The tagger, intentionally small:
 - Notion writes are throttled (~3 req/s) — keep the small sleep between `PATCH`es.
 - Model is `claude-haiku-4-5-20251001` with a cached system prompt and a single
   batched request for all titles; keep it to one call rather than per-task.
-- Secrets (`NOTION_TOKEN`, `ANTHROPIC_API_KEY`) come from env / GitHub Actions
-  secrets only. The full setup (Notion integration, sharing the DB, adding repo
-  secrets) is in `README.md`.
+- Secrets (`NOTION_TOKEN`, `ANTHROPIC_API_KEY`) come from GitHub Actions secrets
+  in CI or a git-ignored repo-root `.env` locally (loaded by `sandbox.env.load_env()`;
+  see the sandbox `.env.example`). The full setup (Notion integration, sharing the
+  DB, adding repo secrets) is in `README.md`.
