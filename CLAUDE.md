@@ -1,78 +1,76 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## What this repo is
 
-A single small component: the **Notion emoji tagger** — a scheduled automation that
-tags incomplete Notion tasks with a contextually-chosen emoji once a day.
+A **pop-in Claude Code sandbox**: a monorepo of small, independent projects. Each
+lives in its own folder under `projects/<name>/` and is self-contained — its own
+code, `README.md`, `CLAUDE.md`, and dependencies. Projects do not depend on each
+other; the only thing they share is the tooling and keys in `shared/`.
 
-There is no app server or test suite. It's one Python script plus a GitHub Actions
-workflow.
+The working model is **one context window ≈ one project**. A fresh session is
+assumed to be a *new* project unless it's clearly scoped to an existing one. Work
+on different projects happens in different context windows, so each session stays
+focused on a single project folder.
 
-> The drive-time isochrone map that used to live here has moved to
-> [`robz-bdb/stampede-hockey-mapping`](https://github.com/robz-bdb/stampede-hockey-mapping).
-
-## Commands
-
-```bash
-pip install -r requirements.txt
-
-# Dry run locally (logs intended changes, writes nothing; skips the time guard)
-DRY_RUN=1 FORCE_RUN=1 NOTION_TOKEN=... ANTHROPIC_API_KEY=... \
-  python scripts/tag_tasks_with_emoji.py
-
-# Real run locally
-FORCE_RUN=1 NOTION_TOKEN=... ANTHROPIC_API_KEY=... \
-  python scripts/tag_tasks_with_emoji.py
+```
+projects/
+  _template/            scaffold copied when starting a new project
+  notion-emoji-tagger/  daily Notion task emoji tagger (has its own CLAUDE.md)
+shared/                 reusable helpers (sandbox.*) + shared deps; see shared/README.md
+.env.example            the shared keys; copy to .env for local runs
 ```
 
-There is no build step, linter config, or test runner in the repo. Manual runs
-go through the GitHub Actions UI (*Notion emoji tagger* → Run workflow), which
-defaults to a dry run.
+## Starting work in a session
 
-## Architecture
+**First, figure out the scope:**
 
-The tagger, intentionally small:
+1. **If the user names or clearly points at an existing project** (e.g. mentions
+   `notion-emoji-tagger`, or the task obviously continues it): treat
+   `projects/<name>/` as the working root and **defer to that project's own
+   `CLAUDE.md`**. Stay inside that folder.
 
-- **`scripts/tag_tasks_with_emoji.py`** — the whole pipeline, configured entirely
-  via environment variables (no flags). Flow: query Notion for incomplete tasks →
-  drop empty/already-emoji titles → one batched Anthropic call returns an emoji
-  per title → `PATCH` each page's title. It talks to the Notion REST API directly
-  (not the MCP connector, which is interactive-session-only) and to Claude via the
-  `anthropic` SDK.
-- **`.github/workflows/notion-emoji-tagger.yml`** — the scheduler. Installs deps
-  and runs the script with secrets in env.
+2. **If the session is fresh and not scoped to an existing project**, treat it as
+   a **new project**:
+   - Ask the user for a short **kebab-case name** and a one-line **intent**.
+   - Scaffold it: `cp -r projects/_template projects/<name>` (then fill in the
+     placeholders in its `CLAUDE.md` / `README.md`).
+   - Work **only** inside `projects/<name>/`.
 
-### Things that are easy to get wrong
+   Don't scaffold a folder before you have a name — avoid leaving empty/junk
+   project dirs.
 
-- **The target is an inline database, not the page.** `tasks-db`
-  (`34a1e3b6eebb81b1af05faeabce55b6c`) is a *page* that wraps the **"All Tasks"**
-  database (`b971e3b6eebb83cc91450191f70d4278`). `TASKS_DB_ID` must be the
-  database ID, which is what the Notion query endpoint needs.
-- **"Incomplete" = `Checkbox` unchecked.** This DB is the standard TickTick
-  "Integrate Notion" schema: title property is `Title`, completion is a
-  `checkbox` named `Checkbox` (no Status property). The query filters on it
-  server-side.
-- **Title sync is bidirectional with TickTick.** Editing `Title` in Notion
-  changes the TickTick task too. That's intended (emoji shows up in both), but it
-  means title writes are not cosmetic-only — be deliberate about changing them.
-- **Idempotency depends on the leading-emoji regex** (`starts_with_emoji`). Tasks
-  whose title already starts with an emoji are skipped, which is what keeps daily
-  re-runs from stacking emojis. Preserve this guard.
-- **DST-safe scheduling is split between cron and code.** The cron fires at both
-  06:00 and 07:00 UTC; `within_run_window()` (America/Chicago, hour == 1) ensures
-  exactly one effective run at 1 AM Central. Manual `workflow_dispatch` sets
-  `FORCE_RUN=1` to bypass that guard. Don't "simplify" the double cron without
-  also handling DST.
+**In all cases: do not modify sibling projects.** A change for one project stays
+within its folder (plus `shared/` only when a shared helper genuinely needs to
+change for everyone).
 
-## Conventions
+## Shared tools & keys
 
-- Per-page update failures are caught and logged so one bad task never aborts the
-  batch; preserve that resilience.
-- Notion writes are throttled (~3 req/s) — keep the small sleep between `PATCH`es.
-- Model is `claude-haiku-4-5-20251001` with a cached system prompt and a single
-  batched request for all titles; keep it to one call rather than per-task.
-- Secrets (`NOTION_TOKEN`, `ANTHROPIC_API_KEY`) come from env / GitHub Actions
-  secrets only. The full setup (Notion integration, sharing the DB, adding repo
-  secrets) is in `README.md`.
+- **Tools:** `shared/` holds the importable `sandbox` package — `sandbox.env`
+  (`load_env()`, `require()`) and `sandbox.clients` (`anthropic_client()`,
+  `notion_session()`). Import it with the `sys.path` bootstrap (it walks up to
+  `shared/`) documented in `shared/README.md` and shown in
+  `projects/_template/src/main.py`.
+- **Keys:** defined **once**, never per project. Local runs read a repo-root
+  `.env` (git-ignored; template in `.env.example`) via `load_env()`. CI reads
+  GitHub Actions repository secrets. Current shared keys: `NOTION_TOKEN`,
+  `ANTHROPIC_API_KEY`. **Never hardcode a secret or commit a real `.env`.**
+
+## Conventions & guardrails
+
+- Keep each project self-contained under its folder; reach for `shared/` instead
+  of copying helper code between projects.
+- Each project owns its own `requirements.txt`; install `shared/requirements.txt`
+  too if the project uses the shared client factories.
+- Workflows live in `.github/workflows/` at the repo root (GitHub requires that),
+  but each scopes itself to its project — e.g. `notion-emoji-tagger.yml` sets
+  `working-directory: projects/notion-emoji-tagger`. Match that pattern when a new
+  project needs CI, and keep workflow names/paths project-prefixed.
+- Update `CHANGELOG.md` when you add a project or make a notable change.
+
+## Projects
+
+| Project | What it is |
+|---------|-----------|
+| [`notion-emoji-tagger`](projects/notion-emoji-tagger/CLAUDE.md) | Scheduled automation that tags incomplete TickTick-synced Notion tasks with a contextually-chosen emoji, once daily at 1 AM US Central. |

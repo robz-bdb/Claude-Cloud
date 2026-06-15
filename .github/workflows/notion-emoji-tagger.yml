@@ -20,6 +20,11 @@ on:
 jobs:
   tag-tasks:
     runs-on: ubuntu-latest
+    # The tagger lives in its own sandbox project folder; run steps from there so
+    # the relative requirements.txt / scripts paths resolve.
+    defaults:
+      run:
+        working-directory: projects/notion-emoji-tagger
     steps:
       - uses: actions/checkout@v4
 

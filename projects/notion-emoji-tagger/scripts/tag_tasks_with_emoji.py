@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import re
 import sys
 import time
@@ -23,10 +24,18 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+# Bootstrap: locate the sandbox `shared/` dir so the shared `sandbox` package is
+# importable, then reuse its env loading and Notion/Anthropic client factories.
+for _ancestor in pathlib.Path(__file__).resolve().parents:
+    if (_ancestor / "shared" / "sandbox").is_dir():
+        sys.path.insert(0, str(_ancestor / "shared"))
+        break
+
+from sandbox.clients import NOTION_API, anthropic_client, notion_session  # noqa: E402
+from sandbox.env import load_env, require  # noqa: E402
+
 # --- Configuration (env) ----------------------------------------------------
 
-NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # The inline "All Tasks" database inside the `tasks-db` page.
 TASKS_DB_ID = os.environ.get("TASKS_DB_ID", "b971e3b6eebb83cc91450191f70d4278")
 TITLE_PROPERTY = os.environ.get("TITLE_PROPERTY", "Title")
@@ -35,8 +44,6 @@ DRY_RUN = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
 # Skip the 1-AM-Central guard (set by manual workflow_dispatch runs).
 FORCE_RUN = os.environ.get("FORCE_RUN", "").lower() in ("1", "true", "yes")
 
-NOTION_API = "https://api.notion.com/v1"
-NOTION_VERSION = "2022-06-28"
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 DEFAULT_EMOJI = "📌"
 LOCAL_TZ = ZoneInfo("America/Chicago")
@@ -79,15 +86,7 @@ def is_valid_single_emoji(candidate: str) -> bool:
 
 # --- Notion ------------------------------------------------------------------
 
-def notion_headers() -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {NOTION_TOKEN}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
-
-
-def fetch_incomplete_tasks() -> list[dict[str, Any]]:
+def fetch_incomplete_tasks(session: requests.Session) -> list[dict[str, Any]]:
     """Return all pages where the completion checkbox is unchecked."""
     url = f"{NOTION_API}/databases/{TASKS_DB_ID}/query"
     payload: dict[str, Any] = {
@@ -99,7 +98,7 @@ def fetch_incomplete_tasks() -> list[dict[str, Any]]:
     while True:
         if cursor:
             payload["start_cursor"] = cursor
-        resp = requests.post(url, headers=notion_headers(), json=payload, timeout=30)
+        resp = session.post(url, json=payload, timeout=30)
         if resp.status_code != 200:
             fail(f"Notion query failed ({resp.status_code}): {resp.text}")
         data = resp.json()
@@ -115,14 +114,14 @@ def get_title(page: dict[str, Any]) -> str:
     return "".join(rt.get("plain_text", "") for rt in prop.get("title", []))
 
 
-def update_title(page_id: str, new_title: str) -> None:
+def update_title(session: requests.Session, page_id: str, new_title: str) -> None:
     url = f"{NOTION_API}/pages/{page_id}"
     payload = {
         "properties": {
             TITLE_PROPERTY: {"title": [{"text": {"content": new_title}}]}
         }
     }
-    resp = requests.patch(url, headers=notion_headers(), json=payload, timeout=30)
+    resp = session.patch(url, json=payload, timeout=30)
     if resp.status_code != 200:
         raise RuntimeError(f"{resp.status_code}: {resp.text}")
 
@@ -131,9 +130,7 @@ def update_title(page_id: str, new_title: str) -> None:
 
 def choose_emojis(titles: list[str]) -> list[str]:
     """Return one emoji per title (same order), via a single batched call."""
-    from anthropic import Anthropic
-
-    client = Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = anthropic_client()
     numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(titles))
     system = (
         "You assign a single, fitting emoji to each to-do task title. "
@@ -172,16 +169,18 @@ def within_run_window() -> bool:
 
 
 def main() -> None:
-    if not NOTION_TOKEN:
-        fail("NOTION_TOKEN is not set.")
-    if not ANTHROPIC_API_KEY:
-        fail("ANTHROPIC_API_KEY is not set.")
+    load_env()  # pick up a repo-root .env for local runs (no-op in CI)
+    try:
+        notion = notion_session()      # requires NOTION_TOKEN
+        require("ANTHROPIC_API_KEY")   # fail fast before doing any Notion work
+    except RuntimeError as exc:
+        fail(str(exc))
 
     if not FORCE_RUN and not within_run_window():
         log("Outside the 1 AM Central run window; exiting (set FORCE_RUN=1 to override).")
         return
 
-    pages = fetch_incomplete_tasks()
+    pages = fetch_incomplete_tasks(notion)
     log(f"Scanned {len(pages)} incomplete task(s).")
 
     eligible: list[tuple[str, str]] = []  # (page_id, title)
@@ -207,7 +206,7 @@ def main() -> None:
             log(f"[dry-run] {title!r} -> {new_title!r}")
             continue
         try:
-            update_title(page_id, new_title)
+            update_title(notion, page_id, new_title)
             log(f"updated: {new_title!r}")
             updated += 1
             time.sleep(0.34)  # stay under Notion's ~3 req/s limit
